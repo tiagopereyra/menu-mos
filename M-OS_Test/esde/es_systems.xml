@@ -1,0 +1,78 @@
+<systemList>
+
+  <!-- ===================== -->
+  <!-- Consolas -->
+  <!-- ===================== -->
+  <system>
+    <name>nes</name>
+    <fullname>Nintendo Entertainment System</fullname>
+    <path>/home/muser/ROMs/nes</path>
+    <extension>.nes .zip</extension>
+    <command>retroarch -L nestopia_libretro.so "%ROM%" --fullscreen</command>
+    <platform>nes</platform>
+    <theme>nes</theme>
+    <category>Consolas</category>
+  </system>
+
+  <!-- ===================== -->
+  <!-- Apps (launchers .sh) -->
+  <!-- ===================== -->
+  <system>
+    <name>youtube</name>
+    <fullname>YouTube</fullname>
+    <path>/home/muser/ROMs/youtube</path>
+    <extension>.sh</extension>
+    <command>bash "%ROM%"</command>
+    <platform>youtube</platform>
+    <theme>youtube</theme>
+    <category>Apps</category>
+  </system>
+
+  <system>
+    <name>steam</name>
+    <fullname>Steam</fullname>
+    <path>/home/muser/ROMs/steam</path>
+    <extension>.sh</extension>
+    <command>bash "%ROM%"</command>
+    <platform>steam</platform>
+    <theme>steam</theme>
+    <category>Apps</category>
+  </system>
+
+  <system>
+    <name>xboxcloud</name>
+    <fullname>Xbox Cloud</fullname>
+    <path>/home/muser/ROMs/xboxcloud</path>
+    <extension>.sh</extension>
+    <command>bash "%ROM%"</command>
+    <platform>xboxcloud</platform>
+    <theme>xboxcloud</theme>
+    <category>Apps</category>
+  </system>
+
+  <system>
+    <name>waydroid</name>
+    <fullname>Waydroid</fullname>
+    <path>/home/muser/ROMs/waydroid</path>
+    <extension>.sh</extension>
+    <command>bash "%ROM%"</command>
+    <platform>waydroid</platform>
+    <theme>waydroid</theme>
+    <category>Apps</category>
+  </system>
+
+  <!-- ===================== -->
+  <!-- Herramientas -->
+  <!-- ===================== -->
+  <system>
+    <name>herramientas</name>
+    <fullname>Herramientas</fullname>
+    <path>/usr/share/emulationstation/scripts</path>
+    <extension>.sh</extension>
+    <command>bash "%ROM%"</command>
+    <platform>tools</platform>
+    <theme>tools</theme>
+    <category>Herramientas</category>
+  </system>
+
+</systemList>

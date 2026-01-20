@@ -1,0 +1,34 @@
+{
+  "esde_command": "es-de",
+  "overlay_title": "M-OS Menu",
+
+  "flatpak": {
+    "chrome_app_id": "com.google.Chrome",
+    "discord_app_id": "com.discordapp.Discord"
+  },
+
+  "urls": {
+    "youtube": "https://www.youtube.com",
+    "xboxcloud": "https://www.xbox.com/play"
+  },
+
+  "audio": {
+    "volume_step_percent": 5
+  },
+
+  "trigger": {
+    "cooldown_ms": 800,
+
+    "keyboard": {
+      "enabled": true,
+      "hold_keys": ["KEY_LEFTCTRL", "KEY_LEFTALT"],
+      "tap_key": "KEY_M"
+    },
+
+    "joystick": {
+      "enabled": true,
+      "hold_buttons": ["BTN_SELECT"],
+      "tap_button": "BTN_START"
+    }
+  }
+}

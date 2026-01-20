@@ -158,8 +158,15 @@ def run_threaded_action(cmd_list, on_finish=None):
 
 # --- ACCIONES ---
 
-def action_vol_up(): return [["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"]]
-def action_vol_down(): return [["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]]
+UID = os.getuid()
+PULSE_SOCKET = f"unix:/run/user/{UID}/pulse/native"
+
+def action_vol_up():
+    return [["pactl", "--server", PULSE_SOCKET,
+             "set-sink-volume", "@DEFAULT_SINK@", "+5%"]]
+def action_vol_down():
+    return [["pactl", "--server", PULSE_SOCKET,
+             "set-sink-volume", "@DEFAULT_SINK@", "-5%"]]
 def action_bri_up(): return [["brightnessctl", "set", "5%+"], ["light", "-A", "5"]]
 def action_bri_down(): return [["brightnessctl", "set", "5%-"], ["light", "-U", "5"]]
 

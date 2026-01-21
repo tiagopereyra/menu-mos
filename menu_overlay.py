@@ -66,15 +66,7 @@ def get_bt_text():
         return "Bluetooth: N/A"
 
 def get_night_light_state():
-    try:
-        res = subprocess.check_output(
-            ["gsettings", "get", "org.gnome.settings-daemon.plugins.color", "night-light-enabled"],
-            text=True,
-            timeout=1
-        ).strip()
-        return res == "true"
-    except:
-        return False
+    return os.path.exists("/tmp/nightlight_state")
 
 # ==========================================
 # 🎨 CONFIGURACIÓN VISUAL
@@ -147,9 +139,7 @@ def run_threaded_action(cmd_list, on_finish=None):
     def worker():
         for cmd in cmd_list:
             try:
-                # timeout corto: evita que acciones (sobre todo volumen) queden colgadas
                 subprocess.run(cmd, check=True, timeout=1)
-                break
             except Exception:
                 pass
         if on_finish:
@@ -171,13 +161,18 @@ def action_bri_up(): return [["brightnessctl", "set", "5%+"], ["light", "-A", "5
 def action_bri_down(): return [["brightnessctl", "set", "5%-"], ["light", "-U", "5"]]
 
 def action_toggle_night_light():
-    curr = get_night_light_state()
-    new_state = "false" if curr else "true"
-    return [[
-        "gsettings", "set",
-        "org.gnome.settings-daemon.plugins.color", "night-light-enabled",
-        new_state
-    ]]
+    state_file = "/tmp/nightlight_state"
+
+    if os.path.exists(state_file):
+        return [
+            ["gammastep", "-x"],
+            ["rm", "-f", state_file]
+        ]
+    else:
+        return [
+            ["gammastep", "-O", "3500"],
+            ["touch", state_file]
+        ]
 
 def action_es(): run_fast(["es-de"]); return "hide"
 def action_files():

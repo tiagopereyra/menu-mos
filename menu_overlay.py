@@ -90,7 +90,7 @@ def get_night_light_state():
 APP_TITLE = "M-OS Overlay"
 WINDOW_ALPHA = 1.0  # más estable (evita glitches en algunos compositores)
 
-C_BG_MAIN = "#FF0000"
+C_BG_MAIN = "#000000"
 C_CARD_BG = "#111111"
 C_CARD_HOVER = "#1E6BFF"
 C_TEXT_MAIN = "#FFFFFF"

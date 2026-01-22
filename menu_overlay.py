@@ -29,6 +29,7 @@ def register_app(identifier, path="/tmp/open_apps"):
     with open(path, "a") as f:
         f.write(str(identifier) + "\n")
 
+
 # ==========================================
 # 🔎 LECTURA DE ESTADO
 # ==========================================
@@ -89,7 +90,7 @@ def get_night_light_state():
 APP_TITLE = "M-OS Overlay"
 WINDOW_ALPHA = 1.0  # más estable (evita glitches en algunos compositores)
 
-C_BG_MAIN = "#000000"
+C_BG_MAIN = "#FF0000"
 C_CARD_BG = "#111111"
 C_CARD_HOVER = "#1E6BFF"
 C_TEXT_MAIN = "#FFFFFF"
@@ -189,14 +190,15 @@ def action_toggle_night_light():
         ]
 
 def action_es():
-    run_fast(["/usr/bin/cerrar_apps.sh"])
-    run_fast(["es-de"])
+    run_threaded_action(["/usr/bin/cerrar_apps.sh"])
+    run_fast(["es-de", "--force-kiosk", "--no-splash", "--no-update-check"])
     return "exit"
 def action_files():
     register_app("dolphin") 
     run_fast(["flatpak", "run", "org.kde.dolphin"]); return "exit"
 def action_back(): return "exit"
 def action_discord(): run_fast([ "flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord" ]); return "exit"
+
 
 def action_wifi():
     # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú

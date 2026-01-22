@@ -29,6 +29,13 @@ def register_app(identifier, path="/tmp/open_apps"):
     with open(path, "a") as f:
         f.write(str(identifier) + "\n")
 
+def kill_es_de():
+    # Buscar procesos que contengan "es-de" en el comando
+    pids = os.popen("ps w | grep -i 'es-de' | grep -v grep | awk '{print $1}'").read().strip().split()
+
+    for pid in pids:
+        if pid.isdigit():
+            os.system(f"kill -9 {pid}")
 
 # ==========================================
 # 🔎 LECTURA DE ESTADO
@@ -191,6 +198,7 @@ def action_toggle_night_light():
 
 def action_es():
     run_threaded_action(["/usr/bin/cerrar_apps.sh"])
+    kill_es_de()
     run_fast(["es-de", "--force-kiosk", "--no-splash", "--no-update-check"])
     return "exit"
 def action_files():

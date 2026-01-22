@@ -15,6 +15,20 @@ import tkinter.font as tkfont
 # =========================
 WRAP_AROUND = False  # <- CAMBIÁ a True si querés que vuelva arriba/abajo al pasar el límite
 
+# ================================
+# ARCHIVO GLOBAL DE ESTADO DE APPS 
+# ================================
+
+def register_app(identifier, path="/tmp/open_apps"):
+    # Crear el archivo si no existe
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            pass  # crea el archivo vacío
+
+    # Agregar el identificador al archivo
+    with open(path, "a") as f:
+        f.write(str(identifier) + "\n")
+
 # ==========================================
 # 🔎 LECTURA DE ESTADO
 # ==========================================
@@ -174,12 +188,15 @@ def action_toggle_night_light():
             ["touch", state_file]
         ]
 
-def action_es(): run_fast(["es-de"]); return "hide"
+def action_es():
+    run_fast(["/usr/bin/cerrar_apps.sh"])
+    run_fast(["es-de"])
+    return "exit"
 def action_files():
-    # Abrimos explorador y al cerrarlo volvemos al menú
-    return {"wait_cmd": ["nautilus"]}
-def action_back(): return "hide"
-def action_discord(): run_fast(["flatpak", "run", "com.discordapp.Discord"]); return "exit"
+    register_app("dolphin") 
+    run_fast(["flatpak", "run", "org.kde.dolphin"]); return "exit"
+def action_back(): return "exit"
+def action_discord(): run_fast([ "flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord" ]); return "exit"
 
 def action_wifi():
     # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú
@@ -198,24 +215,21 @@ def action_shutdown(): run_fast(["systemctl", "poweroff"])
 
 MENU_ITEMS = [
     {"type": "header", "label": "APLICACIONES"},
-    {"icon": {"nf": "󰔟", "fallback": "⌂"}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver al menu", "fn": action_es},
+    {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver al menu", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
+    {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
 
     {"type": "header", "label": "SISTEMA"},
-    {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Volver al juego", "desc": "Ocultar menú", "fn": action_back},
+    {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},
 
     {"icon": {"nf": "󰕾", "fallback": "🔊"}, "label": "Subir Volumen", "desc_fn": get_volume_text, "fn": action_vol_up, "tag": "volume"},
     {"icon": {"nf": "󰕿", "fallback": "🔉"}, "label": "Bajar Volumen", "desc_fn": get_volume_text, "fn": action_vol_down, "tag": "volume"},
-
-    {"icon": {"nf": "󰃠", "fallback": "☀"}, "label": "Subir Brillo", "desc_fn": get_brightness_text, "fn": action_bri_up, "tag": "bright"},
-    {"icon": {"nf": "󰃞", "fallback": "☀"}, "label": "Bajar Brillo", "desc_fn": get_brightness_text, "fn": action_bri_down, "tag": "bright"},
 
     {"icon": {"nf": "󰛨", "fallback": "🌙"}, "label": "Filtro Luz Azul", "desc": "Descanso visual",
      "fn": action_toggle_night_light, "tag": "night", "switch": True, "switch_val": get_night_light_state},
 
     {"icon": {"nf": "󰖩", "fallback": "📶"}, "label": "Wi-Fi", "desc_fn": get_wifi_text, "fn": action_wifi},
     {"icon": {"nf": "󰂯", "fallback": "📡"}, "label": "Bluetooth", "desc_fn": get_bt_text, "fn": action_bt},
-    {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
 
     {"type": "header", "label": "ENERGÍA"},
     {"icon": {"nf": "󰜉", "fallback": "♻️"}, "label": "Reiniciar", "desc": "Reboot system", "fn": action_reboot, "danger": True},

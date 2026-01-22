@@ -179,7 +179,7 @@ def action_files():
     # Abrimos explorador y al cerrarlo volvemos al menú
     return {"wait_cmd": ["nautilus"]}
 def action_back(): return "hide"
-def action_discord(): run_fast(["flatpak", "run", "com.discordapp.Discord"]); return "hide"
+def action_discord(): run_fast(["flatpak", "run", "com.discordapp.Discord"]); return "exit"
 
 def action_wifi():
     # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú
@@ -198,7 +198,7 @@ def action_shutdown(): run_fast(["systemctl", "poweroff"])
 
 MENU_ITEMS = [
     {"type": "header", "label": "APLICACIONES"},
-    {"icon": {"nf": "󰔟", "fallback": "⌂"}, "label": "EmulationStation", "desc": "Volver al sistema principal", "fn": action_es},
+    {"icon": {"nf": "󰔟", "fallback": "⌂"}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver al menu", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
 
     {"type": "header", "label": "SISTEMA"},
@@ -607,6 +607,10 @@ class OverlayApp:
 
         if res == "hide":
             self.root.withdraw()
+            return
+
+        if res == "exit":
+            self.root.destroy()
             return
 
         if isinstance(res, list):

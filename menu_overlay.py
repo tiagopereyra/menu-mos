@@ -26,15 +26,8 @@ WRAP_AROUND = False  # <- CAMBIÁ a True si querés que vuelva arriba/abajo al p
 # ARCHIVO GLOBAL DE ESTADO DE APPS 
 # ================================
 
-def register_app(identifier, path="/tmp/open_apps"):
-    # Crear el archivo si no existe
-    if not os.path.exists(path):
-        with open(path, "w") as f:
-            f.write("")  # crea el archivo vacío
-
-    # Agregar el identificador al archivo
-    with open(path, "a") as f:
-        f.write(str(identifier) + "\n")
+def register_app(identifier):
+    subprocess.run(["/usr/bin/register_app", str(identifier)])
 
 def kill_es_de():
     # Buscar procesos que contengan "es-de" en el comando

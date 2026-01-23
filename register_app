@@ -1,0 +1,12 @@
+#!/bin/sh
+
+IDENTIFIER="$1"
+PATH_FILE="/tmp/open_apps"
+
+# Crear archivo si no existe
+if [ ! -f "$PATH_FILE" ]; then
+    touch "$PATH_FILE"
+fi
+
+# Agregar identificador
+echo "$IDENTIFIER" >> "$PATH_FILE"

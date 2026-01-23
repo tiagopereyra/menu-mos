@@ -1,152 +1,212 @@
 #!/usr/bin/env python3
-import json
-import subprocess
+# -*- coding: utf-8 -*-
+
+import os
 import sys
 import time
-import os
 import socket
+import subprocess
 from pathlib import Path
 
-# Intentar importar evdev para leer joystick/teclado globalmente
 try:
     from evdev import InputDevice, ecodes, list_devices
+    import selectors
 except ImportError:
-    print("Falta evdev. Instalar con: sudo apt install python3-evdev", file=sys.stderr)
+    print("Falta evdev. Instalá con: sudo apt install python3-evdev", file=sys.stderr)
     sys.exit(1)
 
-import selectors
-
-# Rutas
+# =========================
+# RUTAS
+# =========================
 BASE_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = BASE_DIR / "config.json"
 OVERLAY_SCRIPT = BASE_DIR / "menu_overlay.py"
-SOCK_PATH = "/tmp/mos_overlay.sock" # Socket para comunicarnos con el menú
+SOCK_PATH = "/tmp/mos_overlay.sock"
 
-# ==========================================
-# ⚙️ CONFIGURACIÓN DE BOTONES (Hardcoded por seguridad)
-# ==========================================
-# Puedes cambiar esto o usar el config.json, pero aquí es más directo.
-# Nombres comunes: BTN_START, BTN_SELECT, BTN_TL (L1), BTN_TR (R1), BTN_MODE (Home)
+# =========================
+# CONFIG
+# =========================
+COOLDOWN = 0.8          # anti doble-trigger
+RESCAN_EVERY = 5.0      # reescanea /dev/input por si reconectás el joystick
+DEBUG_KEYS = False      # ponelo True si querés ver qué llega
+GRAB_DEVICES = False    # dejalo False para no interferir con ES-DE/Steam
 
-COMBO_JOYSTICK = ["BTN_TL", "BTN_TR"] # L1 + R1 para abrir menú
-COMBO_TECLADO  = ["KEY_LEFTCTRL", "KEY_M"] # Ctrl + M para abrir menú
+# =========================
+# COMBOS
+# =========================
+# DualShock / PS Controller:
+# SHARE  = BTN_SELECT (314)
+# OPTIONS= BTN_START  (315)
+JOY_COMBO = {ecodes.BTN_SELECT, ecodes.BTN_START}
 
-COOLDOWN = 1.0 # Segundos de espera entre activaciones
+# Teclado:
+KEY_COMBO = {ecodes.KEY_LEFTCTRL, ecodes.KEY_M}
 
-# ==========================================
+# =========================
+# HELPERS
+# =========================
+def code_name(code: int) -> str:
+    try:
+        return ecodes.bytype[ecodes.EV_KEY].get(code, str(code))
+    except Exception:
+        return str(code)
+
+def is_gamepad(dev: InputDevice) -> bool:
+    """Filtra para quedarnos con gamepads/joysticks."""
+    try:
+        caps = dev.capabilities(verbose=False)
+        if ecodes.EV_KEY not in caps:
+            return False
+        keys = set(caps.get(ecodes.EV_KEY, []))
+
+        hints = {
+            ecodes.BTN_GAMEPAD,
+            ecodes.BTN_SOUTH,
+            ecodes.BTN_EAST,
+            ecodes.BTN_NORTH,
+            ecodes.BTN_WEST,
+            ecodes.BTN_SELECT,  # Share
+            ecodes.BTN_START,   # Options
+        }
+        return len(keys.intersection(hints)) > 0
+    except Exception:
+        return False
+
+def combo_match(pressed_codes: set[int], combo_codes: set[int]) -> bool:
+    return combo_codes.issubset(pressed_codes)
 
 def send_toggle_command():
-    """
-    Intenta mandar la orden 'toggle' al menú si ya está abierto.
-    Si el menú no está corriendo, lo lanza desde cero.
-    """
-    # 1. Intentar conectar por socket (forma rápida)
+    """Si el menú está abierto, manda toggle por socket; si no, lo lanza."""
     if os.path.exists(SOCK_PATH):
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(SOCK_PATH)
             s.sendall(b"toggle\n")
             s.close()
-            print("[Daemon] Toggle enviado por socket.")
+            # print("[Daemon] Toggle enviado por socket.")
             return
         except Exception:
-            pass # Si falla, intentamos lanzarlo normalmente
+            pass
 
-    # 2. Si no hay socket, lanzamos el script (asegura que se abra si estaba cerrado)
-    print("[Daemon] Lanzando menú...")
-    subprocess.Popen(
-        [sys.executable, str(OVERLAY_SCRIPT)],
-        cwd=str(BASE_DIR),
-        start_new_session=True
-    )
+    # Si no hay socket (menú no corriendo), lanzarlo
+    try:
+        subprocess.Popen(
+            [sys.executable, str(OVERLAY_SCRIPT)],
+            cwd=str(BASE_DIR),
+            start_new_session=True
+        )
+        # print("[Daemon] Menú lanzado.")
+    except Exception as e:
+        print(f"[Daemon] Error lanzando overlay: {e}")
 
-def find_input_devices():
-    """Busca todos los teclados y joysticks conectados"""
-    devices = []
+def scan_devices():
+    found = []
     try:
         for path in list_devices():
             try:
-                dev = InputDevice(path)
-                devices.append(dev)
+                d = InputDevice(path)
+                if is_gamepad(d):
+                    found.append(d)
+                else:
+                    try: d.close()
+                    except: pass
             except Exception:
                 pass
     except Exception:
         pass
-    return devices
+    return found
 
-def check_combo(pressed_keys, combo_needed):
-    """Devuelve True si TODAS las teclas del combo están presionadas"""
-    for btn in combo_needed:
-        if btn not in pressed_keys:
-            return False
-    return True
-
+# =========================
+# MAIN
+# =========================
 def main():
-    print(f"[Daemon] Iniciando servicio M-OS Daemon...")
-    print(f"[Daemon] Combo Joystick: {COMBO_JOYSTICK}")
-    
-    selector = selectors.DefaultSelector()
-    devices = find_input_devices()
-    
-    if not devices:
-        print("[Daemon] ¡OJO! No detecté dispositivos. Conecta un Joystick o Teclado.")
-    
-    for dev in devices:
-        print(f"  -> Escuchando: {dev.name} ({dev.path})")
-        selector.register(dev.fd, selectors.EVENT_READ, dev)
+    print("[Daemon] M-OS overlay daemon activo.")
+    print("[Daemon] Combo Joystick:", " + ".join(code_name(c) for c in sorted(JOY_COMBO)))
+    print("[Daemon] Combo Teclado :", " + ".join(code_name(c) for c in sorted(KEY_COMBO)))
 
-    pressed = set()
+    selector = selectors.DefaultSelector()
+    devices_by_path: dict[str, InputDevice] = {}
+
+    pressed: set[int] = set()
     last_fire = 0.0
+    last_scan = 0.0
+
+    def register_device(dev: InputDevice):
+        if dev.path in devices_by_path:
+            return
+        devices_by_path[dev.path] = dev
+        try:
+            if GRAB_DEVICES:
+                try:
+                    dev.grab()
+                except Exception:
+                    pass
+            selector.register(dev.fd, selectors.EVENT_READ, dev)
+            print(f"[Daemon] -> Escuchando: {dev.name} ({dev.path})")
+        except Exception as e:
+            print(f"[Daemon] No pude registrar {dev.path}: {e}")
+            try: dev.close()
+            except: pass
+            devices_by_path.pop(dev.path, None)
+
+    def unregister_device(dev: InputDevice):
+        try: selector.unregister(dev.fd)
+        except: pass
+        try: dev.close()
+        except: pass
+        devices_by_path.pop(dev.path, None)
+        print(f"[Daemon] Dispositivo desconectado: {dev.name} ({dev.path})")
+
+    # Primer scan
+    for d in scan_devices():
+        register_device(d)
+
+    if not devices_by_path:
+        print("[Daemon] OJO: no detecté gamepads (permisos o no conectado).")
 
     while True:
-        # Re-escanear dispositivos cada tanto si se desconectan? 
-        # Por simplicidad, asumimos que están conectados.
-        
+        now = time.time()
+
+        # Re-scan periódico
+        if (now - last_scan) >= RESCAN_EVERY:
+            last_scan = now
+            for d in scan_devices():
+                register_device(d)
+
+        # Leer eventos
         try:
-            events = selector.select(timeout=2.0)
+            events = selector.select(timeout=1.0)
         except Exception:
             continue
 
         for key, _ in events:
-            dev = key.data
+            dev: InputDevice = key.data
             try:
                 for event in dev.read():
                     if event.type != ecodes.EV_KEY:
                         continue
-                    
-                    # Convertir código numérico a nombre (ej: 304 -> BTN_A)
-                    key_name = ecodes.KEY.get(event.code)
-                    if not key_name: 
-                        key_name = f"UNKNOWN_{event.code}"
 
-                    # event.value: 1=Pulsado, 0=Soltado, 2=Mantenido
+                    # 1=down, 0=up, 2=hold
                     if event.value == 1:
-                        pressed.add(key_name)
+                        pressed.add(event.code)
+                        if DEBUG_KEYS:
+                            print(f"[DBG] DOWN {dev.name}: {code_name(event.code)} ({event.code})")
                     elif event.value == 0:
-                        pressed.discard(key_name)
+                        if DEBUG_KEYS:
+                            print(f"[DBG] UP   {dev.name}: {code_name(event.code)} ({event.code})")
+                        pressed.discard(event.code)
 
-                    # Chequear activación
-                    now = time.time()
-                    if (now - last_fire) > COOLDOWN:
-                        
-                        # ¿Se apretó el combo del Joystick?
-                        if check_combo(pressed, COMBO_JOYSTICK):
-                            print(f"[Daemon] ¡Combo Joystick detectado! {COMBO_JOYSTICK}")
+                    # Chequear combos con cooldown
+                    now2 = time.time()
+                    if (now2 - last_fire) > COOLDOWN:
+                        if combo_match(pressed, JOY_COMBO) or combo_match(pressed, KEY_COMBO):
                             send_toggle_command()
-                            last_fire = now
-                            pressed.clear() # Reset para evitar rebotes
-                        
-                        # ¿Se apretó el combo del Teclado?
-                        elif check_combo(pressed, COMBO_TECLADO):
-                            print(f"[Daemon] ¡Combo Teclado detectado!")
-                            send_toggle_command()
-                            last_fire = now
+                            last_fire = now2
                             pressed.clear()
 
             except OSError:
-                # Dispositivo desconectado
-                selector.unregister(dev.fd)
-                print(f"[Daemon] Dispositivo desconectado: {dev.name}")
+                unregister_device(dev)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     main()

@@ -10,6 +10,13 @@ import threading
 import tkinter as tk
 import tkinter.font as tkfont
 
+# Intentamos importar PIL por si acaso, pero usaremos lógica nativa si falta
+try:
+    from PIL import Image, ImageTk
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
 # =========================
 # CONFIG COMPORTAMIENTO
 # =========================
@@ -23,7 +30,7 @@ def register_app(identifier, path="/tmp/open_apps"):
     # Crear el archivo si no existe
     if not os.path.exists(path):
         with open(path, "w") as f:
-            pass  # crea el archivo vacío
+            f.write("")  # crea el archivo vacío
 
     # Agregar el identificador al archivo
     with open(path, "a") as f:
@@ -31,11 +38,13 @@ def register_app(identifier, path="/tmp/open_apps"):
 
 def kill_es_de():
     # Buscar procesos que contengan "es-de" en el comando
-    pids = os.popen("ps w | grep -i 'es-de' | grep -v grep | awk '{print $1}'").read().strip().split()
-
-    for pid in pids:
-        if pid.isdigit():
-            os.system(f"kill -9 {pid}")
+    try:
+        pids = os.popen("ps w | grep -i 'es-de' | grep -v grep | awk '{print $1}'").read().strip().split()
+        for pid in pids:
+            if pid.isdigit():
+                os.system(f"kill -9 {pid}")
+    except:
+        pass
 
 # ==========================================
 # 🔎 LECTURA DE ESTADO
@@ -407,16 +416,63 @@ class OverlayApp:
         global UI_SCALE
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
+        
+        # Iniciamos en negro y pantalla completa para la carga
+        self.root.configure(bg="black")
 
-        self.root.withdraw()
-        self.root.configure(bg=C_BG_MAIN)
+        # ------------------------------------------------------------------
+        # 🚀 FASE 1: MOSTRAR LOADING (PRIORIDAD ABSOLUTA + FIX 4K)
+        # ------------------------------------------------------------------
+        # Detectar pantalla
+        self.sw = self.root.winfo_screenwidth()
+        self.sh = self.root.winfo_screenheight()
+
+        self.loading_img = None
+        loading_path = os.path.join(ASSETS_DIR, "loading.png")
+        
+        if os.path.exists(loading_path):
+            try:
+                # ESTRATEGIA DE ESCALADO HÍBRIDA
+                if HAS_PIL:
+                    # Si tiene Pillow, redimensionamos suave y exacto
+                    pil_img = Image.open(loading_path)
+                    pil_img = pil_img.resize((self.sw, self.sh), Image.Resampling.LANCZOS)
+                    self.loading_img = ImageTk.PhotoImage(pil_img)
+                else:
+                    # FALLBACK INTELIGENTE (Sin librerías)
+                    # Si es 4K (aprox 3840px) y la imagen es 1080p, hacemos Zoom x2
+                    raw_img = tk.PhotoImage(file=loading_path)
+                    if self.sw > 3000 and raw_img.width() < 2000:
+                         # Truco: Zoom duplica píxeles. 1080p x 2 = 2160p (4K exacto)
+                        self.loading_img = raw_img.zoom(2)
+                    elif self.sw > 1500 and raw_img.width() < 1000:
+                        # Caso raro (720p en monitor 1080p)
+                        self.loading_img = raw_img.zoom(2)
+                    else:
+                        self.loading_img = raw_img
+            except Exception as e:
+                print(f"Error cargando imagen: {e}")
+
+        # Label de carga que cubre todo
+        self.loading_lbl = tk.Label(self.root, image=self.loading_img, bg="black", bd=0, anchor="center")
+        self.loading_lbl.pack(fill="both", expand=True)
+
+        # Forzamos pantalla completa y renderizado INMEDIATO
+        try:
+            self.root.attributes("-fullscreen", True)
+        except:
+            pass
+        self.root.update()  # <--- MAGIC: Esto muestra la imagen al usuario YA
+
+        # ------------------------------------------------------------------
+        # 🐢 FASE 2: CARGAR LA INTERFAZ PESADA (El usuario ve el loading)
+        # ------------------------------------------------------------------
         try:
             self.root.attributes("-alpha", WINDOW_ALPHA)
         except:
             pass
 
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        UI_SCALE = max(1.0, min(min(sw/1920, sh/1080), 1.8))
+        UI_SCALE = max(1.0, min(min(self.sw/1920, self.sh/1080), 1.8))
         self.font = "Segoe UI" if os.name == "nt" else "Inter"
 
         # Fuente principal + fuente para iconos (Nerd Font si existe)
@@ -432,7 +488,8 @@ class OverlayApp:
         global HAS_NERD_FONT
         HAS_NERD_FONT = any(k in (self.icon_font or "") for k in ["Nerd", "Symbols"])
         self.main = tk.Frame(self.root, bg=C_BG_MAIN)
-        self.main.place(relx=0.5, rely=0.5, anchor="center", width=sc(800), relheight=1.0)
+        
+        # NOTA: No hacemos place todavía, lo haremos tras la carga
 
         self._build_header()
 
@@ -466,7 +523,30 @@ class OverlayApp:
         self.root.after(0, self.refresh_all_cards)
         self.periodic_refresh()
 
-        self.root.after(2000, self.reveal_window)
+        # ------------------------------------------------------------------
+        # ⏱️ FASE 3: TRANSICIÓN
+        # ------------------------------------------------------------------
+        # Programar la revelación del menú para completar los 2 segundos de "carga"
+        self.root.after(2000, self.reveal_menu_final)
+
+    def show_loading_sequence(self):
+        """Muestra la imagen de carga, espera 2s y revela el menu (Usado por el socket)"""
+        self.root.deiconify()
+        self.root.attributes("-fullscreen", True)
+        
+        # Ocultar Main, mostrar Loading
+        self.main.place_forget()
+        self.loading_lbl.pack(fill="both", expand=True)
+        self.root.update() # Renderizar YA
+        
+        # Programar la revelación del menú
+        self.root.after(2000, self.reveal_menu_final)
+
+    def reveal_menu_final(self):
+        """Quita la imagen de carga y muestra el menú"""
+        self.loading_lbl.pack_forget()
+        self.main.place(relx=0.5, rely=0.5, anchor="center", width=sc(800), relheight=1.0)
+        self.initial_position()
 
     def _sync_scrollregion(self):
         self.scroll_inner.update_idletasks()
@@ -481,11 +561,6 @@ class OverlayApp:
         self.idx = 0
         self.update_vis()
         self.scroll_to_top()
-
-    def reveal_window(self):
-        self.root.deiconify()
-        self.root.attributes("-fullscreen", True)
-        self.root.after(80, self.initial_position)
 
     def _on_frame_configure(self, event=None):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -729,9 +804,8 @@ class OverlayApp:
                     if "toggle" in msg:
                         def do_toggle():
                             if self.root.state() == "withdrawn":
-                                self.root.deiconify()
-                                self.root.attributes("-fullscreen", True)
-                                self.root.after(80, self.initial_position)
+                                # Si está oculto, ejecutamos la secuencia de carga
+                                self.show_loading_sequence()
                             else:
                                 self.root.withdraw()
                         self.root.after(0, do_toggle)
@@ -753,4 +827,3 @@ if __name__ == "__main__":
         sys.exit()
 
     OverlayApp().root.mainloop()
-

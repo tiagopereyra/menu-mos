@@ -10,46 +10,116 @@ import threading
 import tkinter as tk
 import tkinter.font as tkfont
 
-# Intentamos importar PIL por si acaso, pero usaremos lógica nativa si falta
+# ==========================================
+# 📦 IMPORTACIÓN DE LIBRERÍAS OPCIONALES
+# ==========================================
+
+# PIL (Pillow) para imágenes de alta calidad
 try:
     from PIL import Image, ImageTk
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
 
-# =========================
-# CONFIG COMPORTAMIENTO
-# =========================
-WRAP_AROUND = False  # <- CAMBIÁ a True si querés que vuelva arriba/abajo al pasar el límite
+# EVDEV para soporte de Joystick
+ENABLE_JOYSTICK = True
+HAS_EVDEV = False
 
-# ================================
-# ARCHIVO GLOBAL DE ESTADO DE APPS 
-# ================================
+if ENABLE_JOYSTICK:
+    try:
+        from evdev import InputDevice, ecodes, list_devices
+        import selectors
+        HAS_EVDEV = True
+    except ImportError:
+        HAS_EVDEV = False
+    except Exception:
+        HAS_EVDEV = False
 
-def register_app(identifier):
-    subprocess.run(["/usr/bin/register_app", str(identifier)])
+# ==========================================
+# ⚙️ CONFIGURACIÓN Y CONSTANTES
+# ==========================================
+
+# Comportamiento
+WRAP_AROUND = False  # True: vuelve al inicio al bajar del todo
+JOY_NAV_COOLDOWN = 0.15  # Segundos entre movimientos del stick
+JOY_AXIS_THRESHOLD = 18000  # Zona muerta del stick (aprox 50%)
+
+# Rutas y Archivos
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+UID = os.getuid()
+PULSE_SOCKET = f"unix:/run/user/{UID}/pulse/native"
+
+# Visual
+APP_TITLE = "M-OS Overlay"
+WINDOW_ALPHA = 1.0
+UI_SCALE = 1.0
+ICON_SIZE_BASE = 48
+
+# Colores
+C_BG_MAIN = "#000000"
+C_CARD_BG = "#111111"
+C_CARD_HOVER = "#1E6BFF"
+C_TEXT_MAIN = "#FFFFFF"
+C_TEXT_SEC = "#AAAAAA"
+C_DANGER = "#CF0000"
+ACCENT = "#22c55e"
+BORDER = "#333333"
+
+HAS_NERD_FONT = False
+
+# ==========================================
+# 🛠️ FUNCIONES UTILITARIAS Y DE ESTADO
+# ==========================================
+
+def sc(x: int) -> int: return max(1, int(x * UI_SCALE))
+def fs(x: int) -> int: return max(10, int(x * UI_SCALE))
+
+def register_app(identifier, path="/tmp/open_apps"):
+    """Registra una app abierta para gestión externa"""
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            f.write("")
+    with open(path, "a") as f:
+        f.write(str(identifier) + "\n")
 
 def kill_es_de():
-    # Buscar procesos que contengan "es-de" en el comando
+    """Mata procesos de EmulationStation si existen"""
     try:
-        pids = os.popen("ps w | grep -i 'es-de' | grep -v grep | awk '{print $1}'").read().strip().split()
+        cmd = "ps w | grep -i 'es-de' | grep -v grep | awk '{print $1}'"
+        pids = os.popen(cmd).read().strip().split()
         for pid in pids:
             if pid.isdigit():
                 os.system(f"kill -9 {pid}")
     except:
         pass
 
-# ==========================================
-# 🔎 LECTURA DE ESTADO
-# ==========================================
+def run_fast(cmd):
+    """Ejecuta un comando sin esperar retorno"""
+    try:
+        subprocess.Popen(cmd, start_new_session=True)
+    except Exception as e:
+        print(f"[Err] {cmd}: {e}")
+
+def run_threaded_action(cmd_list, on_finish=None):
+    """Ejecuta una lista de comandos en hilo separado"""
+    def worker():
+        for cmd in cmd_list:
+            try:
+                subprocess.run(cmd, check=True, timeout=1)
+            except Exception:
+                pass
+        if on_finish:
+            on_finish()
+    threading.Thread(target=worker, daemon=True).start()
+
+# --- Lectores de Estado del Sistema ---
 
 def get_volume_text():
     try:
-        # timeout corto para evitar que el refresh del UI se congele si pactl se cuelga
         res = subprocess.check_output(
             ["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
-            text=True,
-            timeout=1
+            text=True, timeout=1
         )
         for part in res.replace("/", " ").replace(",", " ").split():
             if part.endswith("%") and part[:-1].isdigit():
@@ -62,8 +132,7 @@ def get_brightness_text():
     try:
         curr = int(subprocess.check_output(["brightnessctl", "g"], text=True, timeout=1))
         max_b = int(subprocess.check_output(["brightnessctl", "m"], text=True, timeout=1))
-        if max_b == 0:
-            return "Brillo: --"
+        if max_b == 0: return "Brillo: --"
         percent = int((curr / max_b) * 100)
         return f"Brillo: {percent}%"
     except:
@@ -93,155 +162,69 @@ def get_night_light_state():
     return os.path.exists("/tmp/nightlight_state")
 
 # ==========================================
-# 🎨 CONFIGURACIÓN VISUAL
+# 🎮 ACCIONES DEL MENÚ
 # ==========================================
-
-APP_TITLE = "M-OS Overlay"
-WINDOW_ALPHA = 1.0  # más estable (evita glitches en algunos compositores)
-
-C_BG_MAIN = "#000000"
-C_CARD_BG = "#111111"
-C_CARD_HOVER = "#1E6BFF"
-C_TEXT_MAIN = "#FFFFFF"
-C_TEXT_SEC = "#AAAAAA"
-C_DANGER = "#CF0000"
-ACCENT = "#22c55e"
-BORDER = "#333333"
-
-UI_SCALE = 1.0
-ICON_SIZE_BASE = 48
-
-HAS_NERD_FONT = False
-
-def sc(x: int) -> int: return max(1, int(x * UI_SCALE))
-def fs(x: int) -> int: return max(10, int(x * UI_SCALE))
-def get_icon_size() -> int: return max(24, int(ICON_SIZE_BASE * UI_SCALE))
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-
-
-# ==========================================
-# 🔤 ICONOS (Emoji / Nerd Fonts)
-# ==========================================
-
-def pick_first_font(root, candidates):
-    try:
-        fam = set(tkfont.families(root))
-        for c in candidates:
-            if c in fam:
-                return c
-    except Exception:
-        pass
-    return None
-
-def get_icon_text(data):
-    """
-    Permite:
-      - data["icon"] = "texto"
-      - data["icon"] = {"nf": "...", "fallback": "..."}
-    """
-    ico = data.get("icon", "•")
-    if isinstance(ico, dict):
-        # Si hay nerdfont disponible, elegimos nf, sino fallback
-        if globals().get("HAS_NERD_FONT", False) and ico.get("nf"):
-            return ico.get("nf")
-        return ico.get("fallback", "•")
-    return ico
-
-# ==========================================
-# ⚙️ EJECUCIÓN
-# ==========================================
-
-def run_fast(cmd):
-    try:
-        subprocess.Popen(cmd, start_new_session=True)
-    except Exception as e:
-        print(f"[Err] {cmd}: {e}")
-
-def run_threaded_action(cmd_list, on_finish=None):
-    def worker():
-        for cmd in cmd_list:
-            try:
-                subprocess.run(cmd, check=True, timeout=1)
-            except Exception:
-                pass
-        if on_finish:
-            on_finish()
-    threading.Thread(target=worker, daemon=True).start()
-
-# --- ACCIONES ---
-
-UID = os.getuid()
-PULSE_SOCKET = f"unix:/run/user/{UID}/pulse/native"
 
 def action_vol_up():
-    return [["pactl", "--server", PULSE_SOCKET,
-             "set-sink-volume", "@DEFAULT_SINK@", "+5%"]]
+    return [["pactl", "--server", PULSE_SOCKET, "set-sink-volume", "@DEFAULT_SINK@", "+5%"]]
+
 def action_vol_down():
-    return [["pactl", "--server", PULSE_SOCKET,
-             "set-sink-volume", "@DEFAULT_SINK@", "-5%"]]
-def action_bri_up(): return [["brightnessctl", "set", "5%+"], ["light", "-A", "5"]]
-def action_bri_down(): return [["brightnessctl", "set", "5%-"], ["light", "-U", "5"]]
+    return [["pactl", "--server", PULSE_SOCKET, "set-sink-volume", "@DEFAULT_SINK@", "-5%"]]
+
+def action_bri_up():
+    return [["brightnessctl", "set", "5%+"], ["light", "-A", "5"]]
+
+def action_bri_down():
+    return [["brightnessctl", "set", "5%-"], ["light", "-U", "5"]]
 
 def action_toggle_night_light():
     state_file = "/tmp/nightlight_state"
-
     if os.path.exists(state_file):
-        return [
-            ["gammastep", "-x"],
-            ["rm", "-f", state_file]
-        ]
+        return [["gammastep", "-x"], ["rm", "-f", state_file]]
     else:
-        return [
-            ["gammastep", "-O", "3500"],
-            ["touch", state_file]
-        ]
+        return [["gammastep", "-O", "3500"], ["touch", state_file]]
 
 def action_es():
     run_threaded_action(["/usr/bin/cerrar_apps.sh"])
     kill_es_de()
     run_fast(["es-de", "--force-kiosk", "--no-splash", "--no-update-check"])
     return "exit"
-def action_files():
-    register_app("dolphin") 
-    run_fast(["flatpak", "run", "org.kde.dolphin"]); return "exit"
-def action_back(): return "exit"
-def action_discord():
-    register_app("Discord")  
-    run_fast([ "flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord" ]); return "exit"
 
+def action_files():
+    register_app("dolphin")
+    run_fast(["flatpak", "run", "org.kde.dolphin"])
+    return "exit"
+
+def action_discord():
+    register_app("Discord")
+    run_fast(["flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord"])
+    return "exit"
 
 def action_wifi():
-    # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú
     return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "dummy_settings.py"), "wifi"]}
 
 def action_bt():
-    # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú
     return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "dummy_settings.py"), "bluetooth"]}
 
 def action_reboot(): run_fast(["systemctl", "reboot"])
 def action_shutdown(): run_fast(["systemctl", "poweroff"])
+def action_back(): return "exit"
 
 # ==========================================
-# 📋 MENÚ
+# 📋 DEFINICIÓN DEL MENÚ
 # ==========================================
 
 MENU_ITEMS = [
     {"type": "header", "label": "APLICACIONES"},
-    {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver al menu", "fn": action_es},
+    {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
     {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
 
     {"type": "header", "label": "SISTEMA"},
     {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},
-
     {"icon": {"nf": "󰕾", "fallback": "🔊"}, "label": "Subir Volumen", "desc_fn": get_volume_text, "fn": action_vol_up, "tag": "volume"},
     {"icon": {"nf": "󰕿", "fallback": "🔉"}, "label": "Bajar Volumen", "desc_fn": get_volume_text, "fn": action_vol_down, "tag": "volume"},
-
-    {"icon": {"nf": "󰛨", "fallback": "🌙"}, "label": "Filtro Luz Azul", "desc": "Descanso visual",
-     "fn": action_toggle_night_light, "tag": "night", "switch": True, "switch_val": get_night_light_state},
-
+    {"icon": {"nf": "󰛨", "fallback": "🌙"}, "label": "Filtro Luz Azul", "desc": "Descanso visual", "fn": action_toggle_night_light, "tag": "night", "switch": True, "switch_val": get_night_light_state},
     {"icon": {"nf": "󰖩", "fallback": "📶"}, "label": "Wi-Fi", "desc_fn": get_wifi_text, "fn": action_wifi},
     {"icon": {"nf": "󰂯", "fallback": "📡"}, "label": "Bluetooth", "desc_fn": get_bt_text, "fn": action_bt},
 
@@ -251,8 +234,24 @@ MENU_ITEMS = [
 ]
 
 # ==========================================
-# 🧩 UI COMPONENTS
+# 🧩 COMPONENTES UI
 # ==========================================
+
+def pick_first_font(root, candidates):
+    try:
+        fam = set(tkfont.families(root))
+        for c in candidates:
+            if c in fam: return c
+    except Exception: pass
+    return None
+
+def get_icon_text(data):
+    ico = data.get("icon", "•")
+    if isinstance(ico, dict):
+        if globals().get("HAS_NERD_FONT", False) and ico.get("nf"):
+            return ico.get("nf")
+        return ico.get("fallback", "•")
+    return ico
 
 class ToggleSwitch(tk.Canvas):
     def __init__(self, parent, width=50, height=26, bg=C_CARD_BG):
@@ -268,9 +267,11 @@ class ToggleSwitch(tk.Canvas):
         self.delete("all")
         track_col = ACCENT if self.state else BORDER
         pad = 4
+        # Dibujar track
         self.create_oval(0, 0, self.h, self.h, fill=track_col, outline="")
         self.create_oval(self.w-self.h, 0, self.w, self.h, fill=track_col, outline="")
         self.create_rectangle(self.h/2, 0, self.w-self.h/2, self.h, fill=track_col, outline="")
+        # Dibujar knob
         d = self.h - (pad*2)
         x = (self.w - d - pad) if self.state else pad
         self.create_oval(x, pad, x+d, pad+d, fill="#FFFFFF", outline="")
@@ -283,14 +284,14 @@ class DashboardCard(tk.Frame):
         self.is_selected = False
         self.switch_widget = None
         self.icon_font = icon_font
-        self.icon_container = None
 
         self.inner = tk.Frame(self, bg=C_CARD_BG, bd=0, highlightthickness=0)
         self.inner.pack(fill="x", pady=sc(2), padx=0, ipady=sc(8))
 
-        # Icono (texto / Nerd Font / emoji) dentro de contenedor fijo (evita "escalones")
+        # Icono
         self._setup_icon(data, font_main)
 
+        # Contenedor de Texto
         self.text_frame = tk.Frame(self.inner, bg=C_CARD_BG)
         self.text_frame.pack(side="left", fill="both", expand=True)
 
@@ -298,100 +299,68 @@ class DashboardCard(tk.Frame):
             self.switch_widget = ToggleSwitch(self.inner, width=sc(50), height=sc(26), bg=C_CARD_BG)
             self.switch_widget.pack(side="right", padx=sc(20))
 
+        # Título
         fg_title = C_DANGER if data.get("danger") else C_TEXT_MAIN
         self.lbl_title = tk.Label(
-            self.text_frame,
-            text=data.get("label", ""),
-            font=(font_main, fs(14), "bold"),
-            bg=C_CARD_BG,
-            fg=fg_title,
-            anchor="w"
+            self.text_frame, text=data.get("label", ""),
+            font=(font_main, fs(14), "bold"), bg=C_CARD_BG, fg=fg_title, anchor="w"
         )
         self.lbl_title.pack(fill="x", pady=(sc(2), 0))
 
+        # Descripción
         init_desc = data.get("desc", "...")
         self.lbl_desc = tk.Label(
-            self.text_frame,
-            text=init_desc,
-            font=(font_sub, fs(10)),
-            bg=C_CARD_BG,
-            fg=C_TEXT_SEC,
-            anchor="w"
+            self.text_frame, text=init_desc,
+            font=(font_sub, fs(10)), bg=C_CARD_BG, fg=C_TEXT_SEC, anchor="w"
         )
         self.lbl_desc.pack(fill="x")
 
-        # Bind hover/click en todos los widgets relevantes
+        # Event bindings
         widgets = [self.inner, self.icon_container, self.icon_lbl, self.text_frame, self.lbl_title, self.lbl_desc]
-        if self.switch_widget:
-            widgets.append(self.switch_widget)
+        if self.switch_widget: widgets.append(self.switch_widget)
 
         for w in widgets:
-            if not w:
-                continue
+            if not w: continue
             w.bind("<Enter>", lambda e: self.set_highlight(True))
             w.bind("<Leave>", lambda e: self.set_highlight(False))
             w.bind("<Button-1>", lambda e: self.execute())
 
     def _setup_icon(self, data, font_fallback):
-        # Solo iconos en texto (emoji o Nerd Font). Sin imágenes.
         icon_txt = get_icon_text(data)
-
-        # Contenedor fijo para evitar "escalones"
-        self.icon_container = tk.Frame(
-            self.inner, bg=C_CARD_BG, width=sc(70), height=sc(52), bd=0, highlightthickness=0
-        )
+        self.icon_container = tk.Frame(self.inner, bg=C_CARD_BG, width=sc(70), height=sc(52), bd=0, highlightthickness=0)
         self.icon_container.pack_propagate(False)
         self.icon_container.pack(side="left", padx=(sc(12), sc(10)), fill="y")
 
         self.icon_lbl = tk.Label(
-            self.icon_container,
-            text=icon_txt,
+            self.icon_container, text=icon_txt,
             font=(self.icon_font or font_fallback, fs(22)),
-            bg=C_CARD_BG,
-            fg=C_TEXT_MAIN,
-            bd=0
+            bg=C_CARD_BG, fg=C_TEXT_MAIN, bd=0
         )
         self.icon_lbl.pack(expand=True)
 
     def update_data(self):
         if "desc_fn" in self.data:
-            try:
-                self.lbl_desc.config(text=self.data["desc_fn"]())
-            except Exception:
-                pass
+            try: self.lbl_desc.config(text=self.data["desc_fn"]())
+            except: pass
         if self.switch_widget and "switch_val" in self.data:
-            try:
-                self.switch_widget.set_state(self.data["switch_val"]())
-            except Exception:
-                pass
-        try:
-            self.inner.update_idletasks()
-        except Exception:
-            pass
+            try: self.switch_widget.set_state(self.data["switch_val"]())
+            except: pass
 
     def set_highlight(self, active: bool):
-        if self.is_selected == active:
-            return
+        if self.is_selected == active: return
         self.is_selected = active
-
         bg = C_CARD_HOVER if active else C_CARD_BG
-        if active and self.data.get("danger"):
-            bg = C_DANGER
+        if active and self.data.get("danger"): bg = C_DANGER
 
-        # Pintar TODO (inner + icon container + texto) igual, para que no haya "recuadros"
         self.inner.configure(bg=bg)
-        if self.icon_container:
-            self.icon_container.configure(bg=bg)
+        if self.icon_container: self.icon_container.configure(bg=bg)
         self.icon_lbl.configure(bg=bg)
-        if self.text_frame:
-            self.text_frame.configure(bg=bg)
+        if self.text_frame: self.text_frame.configure(bg=bg)
 
-        # Texto
         base_title_fg = C_DANGER if self.data.get("danger") else C_TEXT_MAIN
         self.lbl_title.configure(bg=bg, fg=C_TEXT_MAIN if active else base_title_fg)
         self.lbl_desc.configure(bg=bg, fg=C_TEXT_MAIN if active else C_TEXT_SEC)
 
-        # Switch
         if self.switch_widget:
             self.switch_widget.configure(bg=bg)
             self.switch_widget.draw()
@@ -399,9 +368,8 @@ class DashboardCard(tk.Frame):
     def execute(self):
         self.on_click(self)
 
-
 # ==========================================
-# 🖥️ APP PRINCIPAL
+# 🖥️ APP PRINCIPAL (MAIN LOOP)
 # ==========================================
 
 class OverlayApp:
@@ -409,83 +377,55 @@ class OverlayApp:
         global UI_SCALE
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
-        
-        # Iniciamos en negro y pantalla completa para la carga
         self.root.configure(bg="black")
+        
+        # Estado del Joystick
+        self._joy_last_nav = 0.0
 
-        # ------------------------------------------------------------------
-        # 🚀 FASE 1: MOSTRAR LOADING (PRIORIDAD ABSOLUTA + FIX 4K)
-        # ------------------------------------------------------------------
-        # Detectar pantalla
+        # --- FASE 1: LOADING ---
         self.sw = self.root.winfo_screenwidth()
         self.sh = self.root.winfo_screenheight()
-
+        
         self.loading_img = None
         loading_path = os.path.join(ASSETS_DIR, "loading.png")
-        
         if os.path.exists(loading_path):
             try:
-                # ESTRATEGIA DE ESCALADO HÍBRIDA
                 if HAS_PIL:
-                    # Si tiene Pillow, redimensionamos suave y exacto
                     pil_img = Image.open(loading_path)
                     pil_img = pil_img.resize((self.sw, self.sh), Image.Resampling.LANCZOS)
                     self.loading_img = ImageTk.PhotoImage(pil_img)
                 else:
-                    # FALLBACK INTELIGENTE (Sin librerías)
-                    # Si es 4K (aprox 3840px) y la imagen es 1080p, hacemos Zoom x2
                     raw_img = tk.PhotoImage(file=loading_path)
-                    if self.sw > 3000 and raw_img.width() < 2000:
-                         # Truco: Zoom duplica píxeles. 1080p x 2 = 2160p (4K exacto)
-                        self.loading_img = raw_img.zoom(2)
-                    elif self.sw > 1500 and raw_img.width() < 1000:
-                        # Caso raro (720p en monitor 1080p)
-                        self.loading_img = raw_img.zoom(2)
-                    else:
-                        self.loading_img = raw_img
-            except Exception as e:
-                print(f"Error cargando imagen: {e}")
+                    if self.sw > 1500: self.loading_img = raw_img.zoom(2)
+                    else: self.loading_img = raw_img
+            except Exception: pass
 
-        # Label de carga que cubre todo
         self.loading_lbl = tk.Label(self.root, image=self.loading_img, bg="black", bd=0, anchor="center")
         self.loading_lbl.pack(fill="both", expand=True)
 
-        # Forzamos pantalla completa y renderizado INMEDIATO
-        try:
-            self.root.attributes("-fullscreen", True)
-        except:
-            pass
-        self.root.update()  # <--- MAGIC: Esto muestra la imagen al usuario YA
+        try: self.root.attributes("-fullscreen", True)
+        except: pass
+        self.root.update()
 
-        # ------------------------------------------------------------------
-        # 🐢 FASE 2: CARGAR LA INTERFAZ PESADA (El usuario ve el loading)
-        # ------------------------------------------------------------------
-        try:
-            self.root.attributes("-alpha", WINDOW_ALPHA)
-        except:
-            pass
+        # --- FASE 2: CONSTRUCCIÓN INTERFAZ ---
+        try: self.root.attributes("-alpha", WINDOW_ALPHA)
+        except: pass
 
         UI_SCALE = max(1.0, min(min(self.sw/1920, self.sh/1080), 1.8))
         self.font = "Segoe UI" if os.name == "nt" else "Inter"
-
-        # Fuente principal + fuente para iconos (Nerd Font si existe)
-        main_candidates = ["Inter", "Segoe UI", "DejaVu Sans", "Ubuntu", "Noto Sans"]
-        icon_candidates = [
-            "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Hack Nerd Font",
-            "Symbols Nerd Font Mono", "Symbols Nerd Font", "Nerd Font"
-        ]
-
-        self.font = pick_first_font(self.root, main_candidates) or self.font
-        self.icon_font = pick_first_font(self.root, icon_candidates) or self.font
-
-        global HAS_NERD_FONT
-        HAS_NERD_FONT = any(k in (self.icon_font or "") for k in ["Nerd", "Symbols"])
+        
         self.main = tk.Frame(self.root, bg=C_BG_MAIN)
         
-        # NOTA: No hacemos place todavía, lo haremos tras la carga
+        # Fuentes
+        self.font = pick_first_font(self.root, ["Inter", "Segoe UI", "Ubuntu", "DejaVu Sans"]) or self.font
+        self.icon_font = pick_first_font(self.root, ["JetBrainsMono Nerd Font", "Symbols Nerd Font", "Nerd Font"]) or self.font
+        
+        global HAS_NERD_FONT
+        HAS_NERD_FONT = any(k in (self.icon_font or "") for k in ["Nerd", "Symbols"])
 
         self._build_header()
 
+        # Canvas con Scroll
         self.canvas = tk.Canvas(self.main, bg=C_BG_MAIN, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True, padx=sc(20), pady=sc(10))
         self.scroll_inner = tk.Frame(self.canvas, bg=C_BG_MAIN)
@@ -498,62 +438,136 @@ class OverlayApp:
         self.idx = 0
         self._build_menu()
 
-        tk.Label(self.main, text="ESC: Cerrar  |  ENTER: Seleccionar  |  CONTROL+M: Abrir el menu",
+        # Pie de página
+        tk.Label(self.main, text="ESC: Cerrar | ENTER: Seleccionar | JOYSTICK Compatible",
                  bg=C_BG_MAIN, fg="#444", font=(self.font, fs(10))).pack(side="bottom", pady=sc(20))
 
+        # Bindings Teclado
         self.root.bind("<Escape>", lambda e: self.root.destroy())
         self.root.bind("<Up>", lambda e: self.move_sel(-1))
         self.root.bind("<Down>", lambda e: self.move_sel(1))
         self.root.bind("<Return>", lambda e: self.trigger())
-        self.canvas.bind_all("<Button-4>", lambda e: self.canvas.yview_scroll(-3, "units"))
-        self.canvas.bind_all("<Button-5>", lambda e: self.canvas.yview_scroll(3, "units"))
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
         self.update_vis()
         self.update_clock()
         self._start_socket()
+        self._start_joystick_listener()
 
         self.root.after(0, self.refresh_all_cards)
         self.periodic_refresh()
-
-        # ------------------------------------------------------------------
-        # ⏱️ FASE 3: TRANSICIÓN
-        # ------------------------------------------------------------------
-        # Programar la revelación del menú para completar los 2 segundos de "carga"
         self.root.after(2000, self.reveal_menu_final)
 
-    def show_loading_sequence(self):
-        """Muestra la imagen de carga, espera 2s y revela el menu (Usado por el socket)"""
-        self.root.deiconify()
-        self.root.attributes("-fullscreen", True)
-        
-        # Ocultar Main, mostrar Loading
-        self.main.place_forget()
-        self.loading_lbl.pack(fill="both", expand=True)
-        self.root.update() # Renderizar YA
-        
-        # Programar la revelación del menú
-        self.root.after(2000, self.reveal_menu_final)
+    # ---------------------------
+    # LÓGICA DE JOYSTICK CORREGIDA
+    # ---------------------------
+    def _joy_nav(self, direction):
+        now = time.time()
+        if (now - self._joy_last_nav) < JOY_NAV_COOLDOWN: return
+        self._joy_last_nav = now
+        self.root.after(0, lambda: (self.move_sel(direction), self._force_focus()))
 
+    def _joy_select(self):
+        self.root.after(0, lambda: (self.trigger(), self._force_focus()))
+
+    def _joy_back(self):
+        self.root.after(0, lambda: self.root.destroy())
+
+    def _force_focus(self):
+        try: self.root.focus_force()
+        except: pass
+
+    def _start_joystick_listener(self):
+        if not HAS_EVDEV: return
+
+        # Buscar dispositivos
+        devices = []
+        try:
+            for path in list_devices():
+                try:
+                    d = InputDevice(path)
+                    caps = d.capabilities(verbose=False)
+                    if ecodes.EV_KEY in caps:
+                        keys = caps[ecodes.EV_KEY]
+                        if ecodes.BTN_SOUTH in keys or ecodes.BTN_GAMEPAD in keys:
+                            devices.append(d)
+                except: pass
+        except: pass
+
+        if not devices: return
+
+        def worker(devs):
+            sel = selectors.DefaultSelector()
+            for d in devs:
+                try: sel.register(d.fd, selectors.EVENT_READ, d)
+                except: pass
+            
+            # Alias de códigos comunes
+            BTN_ACCEPT = [ecodes.BTN_SOUTH, ecodes.BTN_A] # A, Start
+            BTN_CANCEL = [ecodes.BTN_EAST, ecodes.BTN_B] # B
+            
+            ABS_Y = ecodes.ABS_Y
+            ABS_HAT0Y = ecodes.ABS_HAT0Y
+
+            while True:
+                try:
+                    events = sel.select(timeout=0.5)
+                    for key, _ in events:
+                        dev = key.data
+                        for event in dev.read():
+                            # 1. BOTONES
+                            if event.type == ecodes.EV_KEY and event.value == 1: # Key Down
+                                if event.code in BTN_ACCEPT:
+                                    self._joy_select()
+                                elif event.code in BTN_CANCEL:
+                                    self._joy_back()
+                                elif event.code == ecodes.BTN_THUMBL: # L3 Click
+                                    self._joy_select()
+
+                            # 2. EJES (D-PAD y Stick)
+                            elif event.type == ecodes.EV_ABS:
+                                val = event.value
+                                code = event.code
+                                
+                                # D-PAD (Hat)
+                                if code == ABS_HAT0Y:
+                                    if val == -1: self._joy_nav(-1)
+                                    elif val == 1: self._joy_nav(+1)
+                                
+                                # Analog Stick Y
+                                elif code == ABS_Y:
+                                    # Zona muerta simple
+                                    if val < -JOY_AXIS_THRESHOLD: self._joy_nav(-1)
+                                    elif val > JOY_AXIS_THRESHOLD: self._joy_nav(+1)
+                                    # Soporte para pads 0..255 (estilo 8bitdo antiguos)
+                                    elif 0 <= val <= 255:
+                                        if val < 50: self._joy_nav(-1)
+                                        elif val > 200: self._joy_nav(+1)
+                except Exception:
+                    time.sleep(1) # Si falla, espera un poco y sigue
+
+        threading.Thread(target=worker, args=(devices,), daemon=True).start()
+
+    # ---------------------------
+    # LÓGICA DE UI
+    # ---------------------------
     def reveal_menu_final(self):
-        """Quita la imagen de carga y muestra el menú"""
         self.loading_lbl.pack_forget()
         self.main.place(relx=0.5, rely=0.5, anchor="center", width=sc(800), relheight=1.0)
         self.initial_position()
-
-    def _sync_scrollregion(self):
-        self.scroll_inner.update_idletasks()
-        self.canvas.update_idletasks()
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def scroll_to_top(self):
-        self._sync_scrollregion()
-        self.canvas.yview_moveto(0.0)
 
     def initial_position(self):
         self.idx = 0
         self.update_vis()
         self.scroll_to_top()
+
+    def scroll_to_top(self):
+        self._sync_scrollregion()
+        self.canvas.yview_moveto(0.0)
+
+    def _sync_scrollregion(self):
+        self.scroll_inner.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def _on_frame_configure(self, event=None):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -561,26 +575,8 @@ class OverlayApp:
     def _on_canvas_configure(self, event):
         self.canvas.itemconfig(self.win_id, width=event.width)
 
-    def refresh_all_cards(self):
-        for c in self.cards:
-            try:
-                c.update_data()
-            except:
-                pass
-        try:
-            self.root.update_idletasks()
-        except:
-            pass
-
-    def periodic_refresh(self):
-        self.refresh_all_cards()
-        self.root.after(2500, self.periodic_refresh)
-
     def _on_mousewheel(self, event):
-        try:
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        except:
-            pass
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _build_header(self):
         h = tk.Frame(self.main, bg=C_BG_MAIN)
@@ -599,213 +595,102 @@ class OverlayApp:
                 c = DashboardCard(self.scroll_inner, item, self.font, self.font, self.icon_font, self.on_card_click)
                 c.pack(fill="x", pady=sc(3))
                 self.cards.append(c)
-
         tk.Frame(self.scroll_inner, bg=C_BG_MAIN, height=sc(50)).pack(fill="x")
 
-    def on_card_click(self, card):
-        fn = card.data["fn"]
-        res = fn()
-
-        # Caso especial: dummy settings (Wi-Fi / Bluetooth)
-        if isinstance(res, dict) and res.get("dummy_cmd"):
-            dummy_cmd = res["dummy_cmd"]
-            prev_idx = self.idx
-
-            # ocultamos el overlay mientras está el dummy
-            self.root.withdraw()
-
-            try:
-                proc = subprocess.Popen(dummy_cmd, start_new_session=True)
-            except Exception:
-                # si falla, volvemos al menú igual
-                self.root.deiconify()
-                self.root.attributes("-fullscreen", True)
-                self.idx = prev_idx
-                self.update_vis()
-                self.ensure_visible()
-                return
-
-            def waiter():
-                try:
-                    proc.wait()
-                except Exception:
-                    pass
-
-                def reopen_menu():
-                    # volver automáticamente al menú
-                    self.root.deiconify()
-                    try:
-                        self.root.attributes("-fullscreen", True)
-                    except:
-                        pass
-                    self.idx = prev_idx
-                    self.update_vis()
-                    self.ensure_visible()
-                    try:
-                        self.root.lift()
-                        self.root.focus_force()
-                    except:
-                        pass
-
-                self.root.after(0, reopen_menu)
-
-            threading.Thread(target=waiter, daemon=True).start()
-            return
-
-        # Caso especial: comandos que deben 'esperar' (p.ej. Explorador)
-        if isinstance(res, dict) and res.get("wait_cmd"):
-            cmd = res["wait_cmd"]
-            prev_idx = self.idx
-            self.root.withdraw()
-
-            try:
-                proc = subprocess.Popen(cmd, start_new_session=True)
-            except Exception:
-                # Si falla, volvemos al menú igual
-                self.root.deiconify()
-                try:
-                    self.root.attributes("-fullscreen", True)
-                except:
-                    pass
-                self.idx = prev_idx
-                self.update_vis()
-                self.ensure_visible()
-                return
-
-            def waiter():
-                try:
-                    proc.wait()
-                except Exception:
-                    pass
-
-                def reopen_menu():
-                    self.root.deiconify()
-                    try:
-                        self.root.attributes("-fullscreen", True)
-                    except:
-                        pass
-                    self.idx = prev_idx
-                    self.update_vis()
-                    self.ensure_visible()
-                    try:
-                        self.root.lift()
-                        self.root.focus_force()
-                    except:
-                        pass
-
-                self.root.after(0, reopen_menu)
-
-            threading.Thread(target=waiter, daemon=True).start()
-            return
-
-
-        if res == "hide":
-            self.root.withdraw()
-            return
-
-        if res == "exit":
-            self.root.destroy()
-            return
-
-        if isinstance(res, list):
-            tag = card.data.get("tag")
-
-            def on_done_ui():
-                if tag:
-                    self.refresh_all_cards()
-
-            run_threaded_action(res, on_finish=lambda: self.root.after(0, on_done_ui))
-
-    def update_clock(self):
-        self.clock.config(text=time.strftime("%H:%M"))
-        self.root.after(1000, self.update_clock)
-
-    # ✅ FIX DEFINITIVO: SIN WRAP (no salta arriba/abajo)
     def move_sel(self, d):
-        if not self.cards:
-            return
-
+        if not self.cards: return
         n = len(self.cards)
         prev = self.idx
-
-        if WRAP_AROUND:
-            self.idx = (self.idx + d) % n
-        else:
-            # clamp
-            self.idx = max(0, min(n - 1, self.idx + d))
-
-        if self.idx == prev:
-            return  # no cambió, no hacer nada
-
-        self.update_vis()
-        self.ensure_visible()
+        if WRAP_AROUND: self.idx = (self.idx + d) % n
+        else: self.idx = max(0, min(n - 1, self.idx + d))
+        
+        if self.idx != prev:
+            self.update_vis()
+            self.ensure_visible()
 
     def ensure_visible(self):
-        if not self.cards:
-            return
+        if not self.cards: return
         card = self.cards[self.idx]
-
         self._sync_scrollregion()
-        canvas_h = self.canvas.winfo_height()
-        inner_h = self.scroll_inner.winfo_height()
-        if inner_h <= canvas_h:
-            return
+        
+        c_h = self.canvas.winfo_height()
+        i_h = self.scroll_inner.winfo_height()
+        if i_h <= c_h: return
 
         card_y = card.winfo_y()
         card_h = card.winfo_height()
-
-        target_center = card_y + (card_h / 2)
-        view_top = target_center - (canvas_h / 2)
-
-        max_scroll = inner_h - canvas_h
-        if view_top < 0:
-            view_top = 0
-        if view_top > max_scroll:
-            view_top = max_scroll
-
-        fraction = 0.0 if max_scroll <= 0 else (view_top / max_scroll)
-        self.canvas.yview_moveto(max(0.0, min(1.0, fraction)))
+        
+        # Centrar selección
+        target = card_y + (card_h / 2) - (c_h / 2)
+        max_scroll = i_h - c_h
+        
+        if target < 0: target = 0
+        if target > max_scroll: target = max_scroll
+        
+        frac = target / max_scroll if max_scroll > 0 else 0
+        self.canvas.yview_moveto(frac)
 
     def update_vis(self):
         for i, c in enumerate(self.cards):
             c.set_highlight(i == self.idx)
 
     def trigger(self):
-        self.cards[self.idx].execute()
+        if self.cards: self.cards[self.idx].execute()
+
+    def on_card_click(self, card):
+        fn = card.data["fn"]
+        res = fn()
+
+        if isinstance(res, dict) and "dummy_cmd" in res:
+            # Ejecutar subproceso y esperar (para wifi/bt)
+            self.root.withdraw()
+            def runner():
+                try: subprocess.run(res["dummy_cmd"], check=False)
+                except: pass
+                self.root.after(0, self.root.deiconify)
+                self.root.after(0, lambda: self.root.attributes("-fullscreen", True))
+                self.root.after(0, self._force_focus)
+            threading.Thread(target=runner, daemon=True).start()
+            return
+
+        if res == "exit": self.root.destroy()
+        elif isinstance(res, list):
+            tag = card.data.get("tag")
+            run_threaded_action(res, on_finish=lambda: self.root.after(0, self.refresh_all_cards))
+
+    def refresh_all_cards(self):
+        for c in self.cards: c.update_data()
+        try: self.root.update_idletasks()
+        except: pass
+
+    def periodic_refresh(self):
+        self.refresh_all_cards()
+        self.root.after(2500, self.periodic_refresh)
+
+    def update_clock(self):
+        self.clock.config(text=time.strftime("%H:%M"))
+        self.root.after(1000, self.update_clock)
 
     def _start_socket(self):
         p = "/tmp/mos_overlay.sock"
         if os.path.exists(p):
-            try:
-                os.unlink(p)
-            except:
-                pass
+            try: os.unlink(p)
+            except: pass
 
         def srv():
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.bind(p)
             s.listen(1)
-            try:
-                os.chmod(p, 0o666)
-            except:
-                pass
-
+            try: os.chmod(p, 0o666)
+            except: pass
             while True:
                 try:
                     c, _ = s.accept()
                     msg = c.recv(1024).decode(errors="ignore")
                     if "toggle" in msg:
-                        def do_toggle():
-                            if self.root.state() == "withdrawn":
-                                # Si está oculto, ejecutamos la secuencia de carga
-                                self.show_loading_sequence()
-                            else:
-                                self.root.withdraw()
-                        self.root.after(0, do_toggle)
+                        self.root.after(0, lambda: self.root.withdraw() if self.root.state() == "normal" else self.root.deiconify())
                     c.close()
-                except:
-                    pass
-
+                except: pass
         threading.Thread(target=srv, daemon=True).start()
 
 if __name__ == "__main__":
@@ -815,8 +700,7 @@ if __name__ == "__main__":
             s.connect("/tmp/mos_overlay.sock")
             s.sendall(b"toggle")
             s.close()
-        except:
-            pass
+        except: pass
         sys.exit()
 
     OverlayApp().root.mainloop()

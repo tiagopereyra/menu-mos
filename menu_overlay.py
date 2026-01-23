@@ -214,7 +214,7 @@ def action_discord():
 
 def action_wifi():
     # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú
-    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "dummy_settings.py"), "wifi"]}
+    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "/usr/share/emulationstation/scripts/ps4wifi2.py"), "wifi"]}
 
 def action_bt():
     # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú

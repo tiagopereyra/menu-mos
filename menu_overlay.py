@@ -205,7 +205,9 @@ def action_files():
     register_app("dolphin") 
     run_fast(["flatpak", "run", "org.kde.dolphin"]); return "exit"
 def action_back(): return "exit"
-def action_discord(): run_fast([ "flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord" ]); return "exit"
+def action_discord():
+    register_app("Discord")  
+    run_fast([ "flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord" ]); return "exit"
 
 
 def action_wifi():

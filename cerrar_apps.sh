@@ -1,6 +1,5 @@
 #!/bin/sh
 
-KEEP="discord"
 FILE="/tmp/open_apps"
 
 if [ -f "$FILE" ]; then
@@ -11,9 +10,6 @@ if [ -f "$FILE" ]; then
         for pid in $(ps w | grep -i "$name" | grep -v grep | awk '{print $1}'); do
             # Obtener comando completo
             cmd=$(ps w | grep "^[ ]*$pid " | awk '{$1=""; print $0}')
-
-            # No matar Discord
-            echo "$cmd" | grep -qi "$KEEP" && continue
 
             kill -9 "$pid"
         done

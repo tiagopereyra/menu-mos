@@ -202,10 +202,10 @@ def action_discord():
 
 def action_wifi():
     # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú
-    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "/usr/share/emulationstation/scripts/ps4wifi2.py"), "wifi"]}
+    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "/home/muser/ROMs/system/WiFi.sh"), "wifi"]}
 
 def action_bt():
-    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "dummy_settings.py"), "bluetooth"]}
+    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "/home/muser/ROMs/system/Bluetooth.sh"), "bluetooth"]}
 
 def action_reboot(): run_fast(["systemctl", "reboot"])
 def action_shutdown(): run_fast(["systemctl", "poweroff"])

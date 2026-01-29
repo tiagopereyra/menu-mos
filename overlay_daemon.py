@@ -71,6 +71,23 @@ def is_gamepad(dev: InputDevice) -> bool:
     except Exception:
         return False
 
+def is_keyboard(dev: InputDevice) -> bool:
+    """Detecta si el dispositivo es un teclado capaz de hacer el combo."""
+    try:
+        caps = dev.capabilities(verbose=False)
+        if ecodes.EV_KEY not in caps:
+            return False
+        keys = set(caps.get(ecodes.EV_KEY, []))
+        
+        # Verificamos si tiene las teclas necesarias para el combo
+        # Esto evita agarrar mouses o botones de encendido
+        if ecodes.KEY_M in keys and ecodes.KEY_LEFTCTRL in keys:
+            return True
+            
+        return False
+    except Exception:
+        return False
+
 def combo_match(pressed_codes: set[int], combo_codes: set[int]) -> bool:
     return combo_codes.issubset(pressed_codes)
 
@@ -82,7 +99,6 @@ def send_toggle_command():
             s.connect(SOCK_PATH)
             s.sendall(b"toggle\n")
             s.close()
-            # print("[Daemon] Toggle enviado por socket.")
             return
         except Exception:
             pass
@@ -94,7 +110,6 @@ def send_toggle_command():
             cwd=str(BASE_DIR),
             start_new_session=True
         )
-        # print("[Daemon] Menú lanzado.")
     except Exception as e:
         print(f"[Daemon] Error lanzando overlay: {e}")
 
@@ -104,7 +119,8 @@ def scan_devices():
         for path in list_devices():
             try:
                 d = InputDevice(path)
-                if is_gamepad(d):
+                # AHORA ACEPTAMOS GAMEPAD O TECLADO
+                if is_gamepad(d) or is_keyboard(d):
                     found.append(d)
                 else:
                     try: d.close()
@@ -161,7 +177,7 @@ def main():
         register_device(d)
 
     if not devices_by_path:
-        print("[Daemon] OJO: no detecté gamepads (permisos o no conectado).")
+        print("[Daemon] OJO: no detecté dispositivos compatibles (permisos o no conectados).")
 
     while True:
         now = time.time()
@@ -192,7 +208,7 @@ def main():
                             print(f"[DBG] DOWN {dev.name}: {code_name(event.code)} ({event.code})")
                     elif event.value == 0:
                         if DEBUG_KEYS:
-                            print(f"[DBG] UP   {dev.name}: {code_name(event.code)} ({event.code})")
+                            print(f"[DBG] UP    {dev.name}: {code_name(event.code)} ({event.code})")
                         pressed.discard(event.code)
 
                     # Chequear combos con cooldown

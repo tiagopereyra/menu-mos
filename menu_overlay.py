@@ -44,6 +44,10 @@ WRAP_AROUND = False  # True: vuelve al inicio al bajar del todo
 JOY_NAV_COOLDOWN = 0.15  # Segundos entre movimientos del stick
 JOY_AXIS_THRESHOLD = 18000  # Zona muerta del stick (aprox 50%)
 
+# Actualizaciones OTA
+OTA_STATE_FILE = "/opt/ota/state"
+SCRIPT_STATE_FILE = "/opt/ota/script-state"
+
 # Rutas y Archivos
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
@@ -74,6 +78,40 @@ HAS_NERD_FONT = False
 
 def sc(x: int) -> int: return max(1, int(x * UI_SCALE))
 def fs(x: int) -> int: return max(10, int(x * UI_SCALE))
+
+
+def read_state_file(path):
+    try:
+        if not os.path.exists(path):
+            return "IDLE"
+        with open(path, "r") as f:
+            return f.read().strip().upper() or "IDLE"
+    except:
+        return "IDLE"
+
+def get_update_status():
+    ota = read_state_file(OTA_STATE_FILE)
+    script = read_state_file(SCRIPT_STATE_FILE)
+
+    # Si cualquiera está en proceso, consideramos “actualizando”
+    busy_states = {"CHECKING", "CHECKED", "DOWNLOADING", "DOWNLOADED", "INSTALLING"}
+
+    if ota in busy_states or script in busy_states:
+        # Devolvemos algo legible para el usuario
+        return f"OTA={ota}, Scripts={script}"
+
+    # Si ambos están DONE o IDLE, consideramos seguro
+    if ota in {"IDLE", "DONE"} and script in {"IDLE", "DONE"}:
+        return None  # sin actualización
+
+    # Cualquier FAILED también es interesante avisar
+    if ota == "FAILED" or script == "FAILED":
+        return f"ERROR: OTA={ota}, Scripts={script}"
+
+    return None
+
+
+
 
 def register_app(identifier, path="/tmp/open_apps"):
     """Registra una app abierta para gestión externa"""
@@ -207,8 +245,30 @@ def action_wifi():
 def action_bt():
     return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "/home/muser/ROMs/system/Bluetooth.sh"), "bluetooth"]}
 
-def action_reboot(): run_fast(["systemctl", "reboot"])
-def action_shutdown(): run_fast(["systemctl", "poweroff"])
+def action_reboot():
+    status = get_update_status()
+    if status:
+        return {
+            "warning": f"El sistema está en actualización o con estado especial:\n{status}\n\n¿Reiniciar igualmente?",
+            "cmd": ["systemctl", "reboot"],
+        }
+
+    run_fast(["systemctl", "reboot"])
+    return "exit"
+
+
+def action_shutdown():
+    status = get_update_status()
+    if status:
+        return {
+            "warning": f"El sistema está en actualización o con estado especial:\n{status}\n\n¿Apagar igualmente?",
+            "cmd": ["systemctl", "poweroff"],
+        }
+
+    run_fast(["systemctl", "poweroff"])
+    return "exit"
+
+
 def action_back(): return "exit"
 
 # ==========================================
@@ -225,7 +285,6 @@ MENU_ITEMS = [
     {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},
     {"icon": {"nf": "󰕾", "fallback": "🔊"}, "label": "Subir Volumen", "desc_fn": get_volume_text, "fn": action_vol_up, "tag": "volume"},
     {"icon": {"nf": "󰕿", "fallback": "🔉"}, "label": "Bajar Volumen", "desc_fn": get_volume_text, "fn": action_vol_down, "tag": "volume"},
-    {"icon": {"nf": "󰛨", "fallback": "🌙"}, "label": "Filtro Luz Azul", "desc": "Descanso visual", "fn": action_toggle_night_light, "tag": "night", "switch": True, "switch_val": get_night_light_state},
     {"icon": {"nf": "󰖩", "fallback": "📶"}, "label": "Wi-Fi", "desc_fn": get_wifi_text, "fn": action_wifi},
     {"icon": {"nf": "󰂯", "fallback": "📡"}, "label": "Bluetooth", "desc_fn": get_bt_text, "fn": action_bt},
 
@@ -459,6 +518,49 @@ class OverlayApp:
         self.periodic_refresh()
         self.root.after(2000, self.reveal_menu_final)
 
+    def show_warning(self, message, on_confirm):
+        win = tk.Toplevel(self.root)
+        win.title("Advertencia")
+        win.configure(bg="#111111")
+        win.transient(self.root)
+        win.grab_set()
+
+        w, h = 420, 200
+        x = (self.sw - w) // 2
+        y = (self.sh - h) // 2
+        win.geometry(f"{w}x{h}+{x}+{y}")
+
+        tk.Label(
+            win,
+            text=message,
+            fg="white",
+            bg="#111111",
+            font=(self.font, fs(12)),
+            wraplength=w - 40,
+            justify="left"
+        ).pack(pady=20, padx=20)
+
+        btn_frame = tk.Frame(win, bg="#111111")
+        btn_frame.pack(pady=10)
+
+        tk.Button(
+            btn_frame,
+            text="Cancelar",
+            width=12,
+            command=win.destroy
+        ).pack(side="left", padx=10)
+
+        def _confirm():
+            win.destroy()
+            on_confirm()
+
+        tk.Button(
+            btn_frame,
+            text="Continuar",
+            width=12,
+            command=_confirm
+        ).pack(side="right", padx=10)
+
     # ---------------------------
     # LÓGICA DE JOYSTICK CORREGIDA
     # ---------------------------
@@ -638,12 +740,31 @@ class OverlayApp:
     def trigger(self):
         if self.cards: self.cards[self.idx].execute()
 
+    def _execute_final_action(self, card):
+        fn = card.data["fn"]
+        res = fn()
+        if res == "exit":
+            self.root.destroy()
+
     def on_card_click(self, card):
         fn = card.data["fn"]
         res = fn()
 
+        # --- NUEVO: warning de actualización ---
+        if isinstance(res, dict) and "warning" in res:
+            msg = res["warning"]
+            cmd = res.get("cmd")
+
+            def do_cmd():
+                if cmd:
+                    run_fast(cmd)
+                self.root.destroy()
+
+            self.show_warning(msg, do_cmd)
+            return
+
+        # Lo que ya tenías:
         if isinstance(res, dict) and "dummy_cmd" in res:
-            # Ejecutar subproceso y esperar (para wifi/bt)
             self.root.withdraw()
             def runner():
                 try: subprocess.run(res["dummy_cmd"], check=False)
@@ -654,10 +775,12 @@ class OverlayApp:
             threading.Thread(target=runner, daemon=True).start()
             return
 
-        if res == "exit": self.root.destroy()
+        if res == "exit":
+            self.root.destroy()
         elif isinstance(res, list):
             tag = card.data.get("tag")
             run_threaded_action(res, on_finish=lambda: self.root.after(0, self.refresh_all_cards))
+
 
     def refresh_all_cards(self):
         for c in self.cards: c.update_data()

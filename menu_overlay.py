@@ -239,11 +239,12 @@ def action_discord():
     return "exit"
 
 def action_wifi():
-    # Abrimos el dummy y al cerrarlo volvemos automáticamente al menú
-    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "/home/muser/ROMs/system/WiFi.sh"), "wifi"]}
+    run_fast(["python3", "/home/muser/ROMs/system/WiFi.sh" ])
+    return "exit"
 
 def action_bt():
-    return {"dummy_cmd": [sys.executable, os.path.join(BASE_DIR, "/home/muser/ROMs/system/Bluetooth.sh"), "bluetooth"]}
+    run_fast(["python3", "/home/muser/ROMs/system/Bluetooth.sh" ])
+    return "exit"
 
 def action_reboot():
     status = get_update_status()

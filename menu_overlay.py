@@ -45,8 +45,8 @@ JOY_NAV_COOLDOWN = 0.15  # Segundos entre movimientos del stick
 JOY_AXIS_THRESHOLD = 18000  # Zona muerta del stick (aprox 50%)
 
 # Actualizaciones OTA
-OTA_STATE_FILE = "/opt/ota/state"
-SCRIPT_STATE_FILE = "/opt/ota/script-state"
+OTA_STATE_FILE = "/home/ota/state"
+SCRIPT_STATE_FILE = "/home/ota/script-state"
 
 # Rutas y Archivos
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -247,7 +247,7 @@ def action_bt():
     return "exit"
 
 def action_spotify():
-    run_fast(["python3", "/home/muserROMs/multimedia/Spotify.sh"])
+    run_fast(["python3", "/home/muser/ROMs/multimedia/Spotify.sh"])
     return "exit"
 
 def action_reboot():

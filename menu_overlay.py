@@ -246,6 +246,10 @@ def action_bt():
     run_fast(["python3", "/home/muser/ROMs/system/Bluetooth.sh" ])
     return "exit"
 
+def action_spotify():
+    run_fast(["python3", "/home/muserROMs/multimedia/Spotify.sh"])
+    return "exit"
+
 def action_reboot():
     status = get_update_status()
     if status:
@@ -281,6 +285,7 @@ MENU_ITEMS = [
     {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
     {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
+    {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
 
     {"type": "header", "label": "SISTEMA"},
     {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},

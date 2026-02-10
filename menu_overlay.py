@@ -205,6 +205,27 @@ def get_bt_text():
 def get_night_light_state():
     return os.path.exists("/tmp/nightlight_state")
 
+def is_gamepad(dev: InputDevice) -> bool:
+    """Filtra para quedarnos con gamepads/joysticks."""
+    try:
+        caps = dev.capabilities(verbose=False)
+        if ecodes.EV_KEY not in caps:
+            return False
+        keys = set(caps.get(ecodes.EV_KEY, []))
+
+        hints = {
+            ecodes.BTN_GAMEPAD,
+            ecodes.BTN_SOUTH,
+            ecodes.BTN_EAST,
+            ecodes.BTN_NORTH,
+            ecodes.BTN_WEST,
+            ecodes.BTN_SELECT,  # Share
+            ecodes.BTN_START,   # Options
+        }
+        return len(keys.intersection(hints)) > 0
+    except Exception:
+        return False
+
 # ==========================================
 # 🎮 ACCIONES DEL MENÚ
 # ==========================================
@@ -450,6 +471,7 @@ class OverlayApp:
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
         self.root.configure(bg="black")
+        threading.Thread(target=self._rescan_joystick, daemon=True).start()
         
         # Estado del Joystick
         self._joy_last_nav = 0.0
@@ -515,7 +537,8 @@ class OverlayApp:
                  bg=C_BG_MAIN, fg="#444", font=(self.font, fs(10))).pack(side="bottom", pady=sc(20))
 
         # Bindings Teclado
-        self.root.bind("<Escape>", lambda e: OVERLAY_VISIBLE and self.root.withdraw())
+        self.root.bind("<Escape>", lambda e: OVERLAY_VISIBLE and self._hide_overlay()
+)
         self.root.bind("<Up>", lambda e: OVERLAY_VISIBLE and self.move_sel(-1))
         self.root.bind("<Down>", lambda e: OVERLAY_VISIBLE and self.move_sel(1))
         self.root.bind("<Return>", lambda e: OVERLAY_VISIBLE and self.trigger())
@@ -589,41 +612,43 @@ class OverlayApp:
 
     def _joy_back(self):
         if not OVERLAY_VISIBLE: return
-        self.root.after(0, lambda: self.root.withdraw())
+        self.root.after(0, lambda: self._hide_overlay()
+)
 
     def _force_focus(self):
         try: self.root.focus_force()
         except: pass
 
     def _start_joystick_listener(self):
-        if not HAS_EVDEV: return
+        if not HAS_EVDEV:
+            return
 
-        # Buscar dispositivos
-        devices = []
-        try:
-            for path in list_devices():
-                try:
-                    d = InputDevice(path)
-                    caps = d.capabilities(verbose=False)
-                    if ecodes.EV_KEY in caps:
-                        keys = caps[ecodes.EV_KEY]
-                        if ecodes.BTN_SOUTH in keys or ecodes.BTN_GAMEPAD in keys:
-                            devices.append(d)
-                except: pass
-        except: pass
+        # Buscar un joystick inicial
+        self.joy = None
+        for path in list_devices():
+            try:
+                d = InputDevice(path)
+                if is_gamepad(d):
+                    self.joy = d
+                    break
+            except:
+                pass
 
-        if not devices: return
+        if not self.joy:
+            print("[Overlay] No se detectó joystick al iniciar.")
+            return
 
-        def worker(devs):
+        print(f"[Overlay] Joystick inicial: {self.joy.name} ({self.joy.path})")
+
+        def worker(dev):
             sel = selectors.DefaultSelector()
-            for d in devs:
-                try: sel.register(d.fd, selectors.EVENT_READ, d)
-                except: pass
-            
-            # Alias de códigos comunes
-            BTN_ACCEPT = [ecodes.BTN_SOUTH, ecodes.BTN_A] # A, Start
-            BTN_CANCEL = [ecodes.BTN_EAST, ecodes.BTN_B] # B
-            
+            try:
+                sel.register(dev.fd, selectors.EVENT_READ, dev)
+            except:
+                return
+
+            BTN_ACCEPT = [ecodes.BTN_SOUTH, ecodes.BTN_A]
+            BTN_CANCEL = [ecodes.BTN_EAST, ecodes.BTN_B]
             ABS_Y = ecodes.ABS_Y
             ABS_HAT0Y = ecodes.ABS_HAT0Y
 
@@ -633,40 +658,37 @@ class OverlayApp:
                     for key, _ in events:
                         dev = key.data
                         for event in dev.read():
-                            if not OVERLAY_VISIBLE: 
+                            if not OVERLAY_VISIBLE:
                                 continue
-                            # 1. BOTONES
-                            if event.type == ecodes.EV_KEY and event.value == 1: # Key Down
+
+                            # Botones
+                            if event.type == ecodes.EV_KEY and event.value == 1:
                                 if event.code in BTN_ACCEPT:
                                     self._joy_select()
                                 elif event.code in BTN_CANCEL:
                                     self._joy_back()
-                                elif event.code == ecodes.BTN_THUMBL: # L3 Click
-                                    self._joy_select()
 
-                            # 2. EJES (D-PAD y Stick)
+                            # Ejes
                             elif event.type == ecodes.EV_ABS:
                                 val = event.value
                                 code = event.code
-                                
-                                # D-PAD (Hat)
+
                                 if code == ABS_HAT0Y:
                                     if val == -1: self._joy_nav(-1)
                                     elif val == 1: self._joy_nav(+1)
-                                
-                                # Analog Stick Y
+
                                 elif code == ABS_Y:
-                                    # Zona muerta simple
                                     if val < -JOY_AXIS_THRESHOLD: self._joy_nav(-1)
                                     elif val > JOY_AXIS_THRESHOLD: self._joy_nav(+1)
-                                    # Soporte para pads 0..255 (estilo 8bitdo antiguos)
-                                    elif 0 <= val <= 255:
-                                        if val < 50: self._joy_nav(-1)
-                                        elif val > 200: self._joy_nav(+1)
-                except Exception:
-                    time.sleep(1) # Si falla, espera un poco y sigue
 
-        threading.Thread(target=worker, args=(devices,), daemon=True).start()
+                except OSError:
+                    print("[Overlay] Joystick desconectado.")
+                    return
+                except:
+                    time.sleep(0.2)
+
+        threading.Thread(target=worker, args=(self.joy,), daemon=True).start()
+
 
     # ---------------------------
     # LÓGICA DE UI
@@ -762,7 +784,8 @@ class OverlayApp:
         res = fn()
         if res == "exit":
             # self.root.destroy()
-            self.root.withdraw()
+            self._hide_overlay()
+
 
     def on_card_click(self, card):
         fn = card.data["fn"]
@@ -776,14 +799,16 @@ class OverlayApp:
             def do_cmd():
                 if cmd:
                     run_fast(cmd)
-                self.root.withdraw() 
+                self._hide_overlay()
+ 
 
             self.show_warning(msg, do_cmd)
             return
 
         # Lo que ya tenías:
         if isinstance(res, dict) and "dummy_cmd" in res:
-            self.root.withdraw()
+            self._hide_overlay()
+
             def runner():
                 try: subprocess.run(res["dummy_cmd"], check=False)
                 except: pass
@@ -794,7 +819,8 @@ class OverlayApp:
             return
 
         if res == "exit":
-            self.root.withdraw() 
+            self._hide_overlay()
+ 
             return
         elif isinstance(res, list):
             tag = card.data.get("tag")
@@ -835,11 +861,34 @@ class OverlayApp:
                     c.close()
                 except: pass
         threading.Thread(target=srv, daemon=True).start()
-    
+
+    def _rescan_joystick(self):
+        while True:
+            time.sleep(3)
+
+            # Si el joystick actual ya no existe → reconectar
+            if self.joy and not os.path.exists(self.joy.path):
+                print("[Overlay] Joystick desconectado, buscando otro...")
+                self.joy = None
+
+            # Si no hay joystick → buscar uno nuevo
+            if self.joy is None:
+                for path in list_devices():
+                    try:
+                        d = InputDevice(path)
+                        if is_gamepad(d):
+                            print(f"[Overlay] Joystick reconectado: {d.name} ({path})")
+                            self.joy = d
+                            threading.Thread(target=self._joy_listener, daemon=True).start()
+                            break
+                    except:
+                        pass
+
     def _hide_overlay(self):
         global OVERLAY_VISIBLE
         OVERLAY_VISIBLE = False
-        self.root.withdraw()
+        self._hide_overlay()
+
 
     def _show_overlay(self):
         global OVERLAY_VISIBLE

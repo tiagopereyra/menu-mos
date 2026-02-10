@@ -39,7 +39,7 @@ if ENABLE_JOYSTICK:
 # ⚙️ VARIABLE DE ESTADO GLOBAL
 # ==========================================
 
-OVERLAY_VISIBLE = False
+OVERLAY_VISIBLE = threading.Event()
 
 # ==========================================
 # ⚙️ CONFIGURACIÓN Y CONSTANTES
@@ -471,6 +471,8 @@ class OverlayApp:
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
         self.root.configure(bg="black")
+        self.joy_thread_running = False
+        self.joy_thread = None
         threading.Thread(target=self._rescan_joystick, daemon=True).start()
         
         # Estado del Joystick
@@ -537,8 +539,7 @@ class OverlayApp:
                  bg=C_BG_MAIN, fg="#444", font=(self.font, fs(10))).pack(side="bottom", pady=sc(20))
 
         # Bindings Teclado
-        self.root.bind("<Escape>", lambda e: OVERLAY_VISIBLE and self._hide_overlay()
-)
+        self.root.bind("<Escape>", lambda e: OVERLAY_VISIBLE and self._hide_overlay())
         self.root.bind("<Up>", lambda e: OVERLAY_VISIBLE and self.move_sel(-1))
         self.root.bind("<Down>", lambda e: OVERLAY_VISIBLE and self.move_sel(1))
         self.root.bind("<Return>", lambda e: OVERLAY_VISIBLE and self.trigger())
@@ -600,20 +601,19 @@ class OverlayApp:
     # LÓGICA DE JOYSTICK CORREGIDA
     # ---------------------------
     def _joy_nav(self, direction):
-        if not OVERLAY_VISIBLE: return
+        if not OVERLAY_VISIBLE.is_set(): return
         now = time.time()
         if (now - self._joy_last_nav) < JOY_NAV_COOLDOWN: return
         self._joy_last_nav = now
         self.root.after(0, lambda: (self.move_sel(direction), self._force_focus()))
 
     def _joy_select(self):
-        if not OVERLAY_VISIBLE: return
+        if not OVERLAY_VISIBLE.is_set(): return
         self.root.after(0, lambda: (self.trigger(), self._force_focus()))
 
     def _joy_back(self):
-        if not OVERLAY_VISIBLE: return
-        self.root.after(0, lambda: self._hide_overlay()
-)
+        if not OVERLAY_VISIBLE.is_set(): return
+        self.root.after(0, lambda: self._hide_overlay())
 
     def _force_focus(self):
         try: self.root.focus_force()
@@ -623,7 +623,12 @@ class OverlayApp:
         if not HAS_EVDEV:
             return
 
-        # Buscar un joystick inicial
+        # Si ya hay un thread corriendo → detenerlo
+        if self.joy_thread_running:
+            self.joy_thread_running = False
+            time.sleep(0.1)
+
+        # Buscar joystick
         self.joy = None
         for path in list_devices():
             try:
@@ -641,6 +646,8 @@ class OverlayApp:
         print(f"[Overlay] Joystick inicial: {self.joy.name} ({self.joy.path})")
 
         def worker(dev):
+            self.joy_thread_running = True
+
             sel = selectors.DefaultSelector()
             try:
                 sel.register(dev.fd, selectors.EVENT_READ, dev)
@@ -652,23 +659,32 @@ class OverlayApp:
             ABS_Y = ecodes.ABS_Y
             ABS_HAT0Y = ecodes.ABS_HAT0Y
 
-            while True:
+            while self.joy_thread_running:
                 try:
                     events = sel.select(timeout=0.5)
+
+                    if not OVERLAY_VISIBLE.is_set():
+                        # Consumir eventos sin procesarlos
+                        for key, _ in events:
+                            dev = key.data
+                            try:
+                                for _ in dev.read():
+                                    pass
+                            except:
+                                pass
+                        continue
+
+
                     for key, _ in events:
                         dev = key.data
                         for event in dev.read():
-                            if not OVERLAY_VISIBLE:
-                                continue
 
-                            # Botones
                             if event.type == ecodes.EV_KEY and event.value == 1:
                                 if event.code in BTN_ACCEPT:
                                     self._joy_select()
                                 elif event.code in BTN_CANCEL:
                                     self._joy_back()
 
-                            # Ejes
                             elif event.type == ecodes.EV_ABS:
                                 val = event.value
                                 code = event.code
@@ -683,11 +699,16 @@ class OverlayApp:
 
                 except OSError:
                     print("[Overlay] Joystick desconectado.")
-                    return
+                    break
                 except:
                     time.sleep(0.2)
 
-        threading.Thread(target=worker, args=(self.joy,), daemon=True).start()
+            print("[Overlay] Listener finalizado.")
+
+        # Crear thread nuevo
+        self.joy_thread = threading.Thread(target=worker, args=(self.joy,), daemon=True)
+        self.joy_thread.start()
+
 
 
     # ---------------------------
@@ -786,7 +807,6 @@ class OverlayApp:
             # self.root.destroy()
             self._hide_overlay()
 
-
     def on_card_click(self, card):
         fn = card.data["fn"]
         res = fn()
@@ -799,8 +819,7 @@ class OverlayApp:
             def do_cmd():
                 if cmd:
                     run_fast(cmd)
-                self._hide_overlay()
- 
+                self._hide_overlay() 
 
             self.show_warning(msg, do_cmd)
             return
@@ -808,7 +827,6 @@ class OverlayApp:
         # Lo que ya tenías:
         if isinstance(res, dict) and "dummy_cmd" in res:
             self._hide_overlay()
-
             def runner():
                 try: subprocess.run(res["dummy_cmd"], check=False)
                 except: pass
@@ -819,8 +837,7 @@ class OverlayApp:
             return
 
         if res == "exit":
-            self._hide_overlay()
- 
+            self._hide_overlay() 
             return
         elif isinstance(res, list):
             tag = card.data.get("tag")
@@ -857,7 +874,9 @@ class OverlayApp:
                     c, _ = s.accept()
                     msg = c.recv(1024).decode(errors="ignore")
                     if "toggle" in msg:
-                        self.root.after(0, lambda: (self._hide_overlay() if self.root.state() == "normal" else self._show_overlay()))
+                        self.root.after(0, lambda: (
+                            self._hide_overlay() if OVERLAY_VISIBLE.is_set() else self._show_overlay()
+                        ))
                     c.close()
                 except: pass
         threading.Thread(target=srv, daemon=True).start()
@@ -866,12 +885,12 @@ class OverlayApp:
         while True:
             time.sleep(3)
 
-            # Si el joystick actual ya no existe → reconectar
             if self.joy and not os.path.exists(self.joy.path):
-                print("[Overlay] Joystick desconectado, buscando otro...")
+                print("[Overlay] Joystick desconectado.")
                 self.joy = None
+                self.joy_thread_running = False
+                time.sleep(0.1)
 
-            # Si no hay joystick → buscar uno nuevo
             if self.joy is None:
                 for path in list_devices():
                     try:
@@ -879,26 +898,40 @@ class OverlayApp:
                         if is_gamepad(d):
                             print(f"[Overlay] Joystick reconectado: {d.name} ({path})")
                             self.joy = d
-                            threading.Thread(target=self._joy_listener, daemon=True).start()
+                            self._start_joystick_listener()
                             break
                     except:
                         pass
 
+
     def _hide_overlay(self):
-        global OVERLAY_VISIBLE
-        OVERLAY_VISIBLE = False
-        self._hide_overlay()
+        OVERLAY_VISIBLE.clear()
+
+        if self.joy:
+            try:
+                self.joy.ungrab()
+            except:
+                pass
+
+        self.root.withdraw()
 
 
     def _show_overlay(self):
-        global OVERLAY_VISIBLE
-        OVERLAY_VISIBLE = True
+        OVERLAY_VISIBLE.set()
+
+        if self.joy:
+            try:
+                self.joy.grab()
+            except:
+                pass
+
         self.root.deiconify()
         try:
             self.root.attributes("-fullscreen", True)
         except:
             pass
         self._force_focus()
+
 
 
 if __name__ == "__main__":

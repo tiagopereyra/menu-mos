@@ -633,6 +633,8 @@ class OverlayApp:
                     for key, _ in events:
                         dev = key.data
                         for event in dev.read():
+                            if not OVERLAY_VISIBLE: 
+                                continue
                             # 1. BOTONES
                             if event.type == ecodes.EV_KEY and event.value == 1: # Key Down
                                 if event.code in BTN_ACCEPT:

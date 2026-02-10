@@ -285,7 +285,7 @@ MENU_ITEMS = [
     {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
     {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
-    {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
+    {"icon": {"nf": "󰙯", "fallback": "󰎄"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
 
     {"type": "header", "label": "SISTEMA"},
     {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},
@@ -509,7 +509,7 @@ class OverlayApp:
                  bg=C_BG_MAIN, fg="#444", font=(self.font, fs(10))).pack(side="bottom", pady=sc(20))
 
         # Bindings Teclado
-        self.root.bind("<Escape>", lambda e: self.root.destroy())
+        self.root.bind("<Escape>", lambda e: self.root.withdraw())
         self.root.bind("<Up>", lambda e: self.move_sel(-1))
         self.root.bind("<Down>", lambda e: self.move_sel(1))
         self.root.bind("<Return>", lambda e: self.trigger())
@@ -580,7 +580,7 @@ class OverlayApp:
         self.root.after(0, lambda: (self.trigger(), self._force_focus()))
 
     def _joy_back(self):
-        self.root.after(0, lambda: self.root.destroy())
+        self.root.after(0, lambda: self.root.withdraw())
 
     def _force_focus(self):
         try: self.root.focus_force()
@@ -750,7 +750,8 @@ class OverlayApp:
         fn = card.data["fn"]
         res = fn()
         if res == "exit":
-            self.root.destroy()
+            # self.root.destroy()
+            self.root.withdraw()
 
     def on_card_click(self, card):
         fn = card.data["fn"]
@@ -764,7 +765,7 @@ class OverlayApp:
             def do_cmd():
                 if cmd:
                     run_fast(cmd)
-                self.root.destroy()
+                self.root.withdraw() 
 
             self.show_warning(msg, do_cmd)
             return
@@ -782,7 +783,8 @@ class OverlayApp:
             return
 
         if res == "exit":
-            self.root.destroy()
+            self.root.withdraw() 
+            return
         elif isinstance(res, list):
             tag = card.data.get("tag")
             run_threaded_action(res, on_finish=lambda: self.root.after(0, self.refresh_all_cards))
@@ -833,4 +835,6 @@ if __name__ == "__main__":
         except: pass
         sys.exit()
 
-    OverlayApp().root.mainloop()
+    app = OverlayApp()
+    app.root.withdraw() 
+    app.root.mainloop()

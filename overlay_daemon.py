@@ -103,16 +103,6 @@ def send_toggle_command():
         except Exception:
             pass
 
-    # Si no hay socket (menú no corriendo), lanzarlo
-    try:
-        subprocess.Popen(
-            [sys.executable, str(OVERLAY_SCRIPT)],
-            cwd=str(BASE_DIR),
-            start_new_session=True
-        )
-    except Exception as e:
-        print(f"[Daemon] Error lanzando overlay: {e}")
-
 def scan_devices():
     found = []
     try:

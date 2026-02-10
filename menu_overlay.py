@@ -36,6 +36,12 @@ if ENABLE_JOYSTICK:
         HAS_EVDEV = False
 
 # ==========================================
+# ⚙️ VARIABLE DE ESTADO GLOBAL
+# ==========================================
+
+OVERLAY_VISIBLE = False
+
+# ==========================================
 # ⚙️ CONFIGURACIÓN Y CONSTANTES
 # ==========================================
 
@@ -509,10 +515,10 @@ class OverlayApp:
                  bg=C_BG_MAIN, fg="#444", font=(self.font, fs(10))).pack(side="bottom", pady=sc(20))
 
         # Bindings Teclado
-        self.root.bind("<Escape>", lambda e: self.root.withdraw())
-        self.root.bind("<Up>", lambda e: self.move_sel(-1))
-        self.root.bind("<Down>", lambda e: self.move_sel(1))
-        self.root.bind("<Return>", lambda e: self.trigger())
+        self.root.bind("<Escape>", lambda e: OVERLAY_VISIBLE and self.root.withdraw())
+        self.root.bind("<Up>", lambda e: OVERLAY_VISIBLE and self.move_sel(-1))
+        self.root.bind("<Down>", lambda e: OVERLAY_VISIBLE and self.move_sel(1))
+        self.root.bind("<Return>", lambda e: OVERLAY_VISIBLE and self.trigger())
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
         self.update_vis()
@@ -571,15 +577,18 @@ class OverlayApp:
     # LÓGICA DE JOYSTICK CORREGIDA
     # ---------------------------
     def _joy_nav(self, direction):
+        if not OVERLAY_VISIBLE: return
         now = time.time()
         if (now - self._joy_last_nav) < JOY_NAV_COOLDOWN: return
         self._joy_last_nav = now
         self.root.after(0, lambda: (self.move_sel(direction), self._force_focus()))
 
     def _joy_select(self):
+        if not OVERLAY_VISIBLE: return
         self.root.after(0, lambda: (self.trigger(), self._force_focus()))
 
     def _joy_back(self):
+        if not OVERLAY_VISIBLE: return
         self.root.after(0, lambda: self.root.withdraw())
 
     def _force_focus(self):
@@ -820,10 +829,26 @@ class OverlayApp:
                     c, _ = s.accept()
                     msg = c.recv(1024).decode(errors="ignore")
                     if "toggle" in msg:
-                        self.root.after(0, lambda: self.root.withdraw() if self.root.state() == "normal" else self.root.deiconify())
+                        self.root.after(0, lambda: (self._hide_overlay() if self.root.state() == "normal" else self._show_overlay()))
                     c.close()
                 except: pass
         threading.Thread(target=srv, daemon=True).start()
+    
+    def _hide_overlay(self):
+        global OVERLAY_VISIBLE
+        OVERLAY_VISIBLE = False
+        self.root.withdraw()
+
+    def _show_overlay(self):
+        global OVERLAY_VISIBLE
+        OVERLAY_VISIBLE = True
+        self.root.deiconify()
+        try:
+            self.root.attributes("-fullscreen", True)
+        except:
+            pass
+        self._force_focus()
+
 
 if __name__ == "__main__":
     if "--toggle" in sys.argv:

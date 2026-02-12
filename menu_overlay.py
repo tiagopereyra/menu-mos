@@ -471,10 +471,14 @@ class OverlayApp:
         self.root.configure(bg="black")
         self.joy_thread_running = False
         self.joy_thread = None
-        threading.Thread(target=self._rescan_joystick, daemon=True).start()
         
         # Estado del Joystick
+        self.joy = None
+        self.joy_thread_running = False
+        self.joy_thread = None
         self._joy_last_nav = 0.0
+        
+        threading.Thread(target=self._rescan_joystick, daemon=True).start()
 
         # --- FASE 1: LOADING ---
         self.sw = self.root.winfo_screenwidth()

@@ -622,72 +622,60 @@ class OverlayApp:
         except: pass
 
     def _start_joystick_listener(self):
-        """Lanza el hilo de escucha solo si evdev está disponible."""
-        if not HAS_EVDEV or self.joy is None:
-            return
+            """Lanza el hilo de lectura de eventos."""
+            if not HAS_EVDEV or self.joy is None:
+                return
 
-        # Aseguramos que el hilo anterior esté muerto
-        self.joy_thread_running = False
-        time.sleep(0.1)
-
-        self.joy_thread = threading.Thread(
-            target=self._joystick_worker, 
-            args=(self.joy,), 
-            daemon=True
-        )
-        self.joy_thread.start()
+            self.joy_thread_running = True
+            self.joy_thread = threading.Thread(
+                target=self._joystick_worker,
+                args=(self.joy,),
+                daemon=True
+            )
+            self.joy_thread.start()
 
     def _joystick_worker(self, dev):
-        """Maneja la lectura de eventos del mando."""
-        self.joy_thread_running = True
-        sel = selectors.DefaultSelector()
+        """Lee los eventos del mando directamente."""
+        print(f"[Overlay] Hilo de escucha iniciado para {dev.name}")
         
         try:
-            sel.register(dev.fd, selectors.EVENT_READ)
-            
-            # Códigos de botones frecuentes
-            BTN_ACCEPT = {ecodes.BTN_SOUTH, ecodes.BTN_A, ecodes.BTN_GAMEPAD}
-            BTN_CANCEL = {ecodes.BTN_EAST, ecodes.BTN_B}
+            # Si el overlay ya es visible al conectar, agarramos el foco
+            if OVERLAY_VISIBLE.is_set():
+                try: dev.grab()
+                except: pass
 
-            while self.joy_thread_running:
-                # timeout para permitir que el hilo verifique self.joy_thread_running
-                events = sel.select(timeout=0.5)
+            for event in dev.read_loop(): # read_loop es más eficiente y simple
+                if not self.joy_thread_running or self.joy is None:
+                    break
                 
-                if not events:
+                # Solo procesar si el menú está visible
+                if not OVERLAY_VISIBLE.is_set():
                     continue
 
-                for _ in dev.read():
-                    # Solo procesamos si el overlay está a la vista
-                    if not OVERLAY_VISIBLE.is_set():
-                        continue
+                # --- BOTONES ---
+                if event.type == ecodes.EV_KEY:
+                    if event.value == 1: # Botón presionado
+                        if event.code in [ecodes.BTN_SOUTH, ecodes.BTN_A, ecodes.BTN_GAMEPAD]:
+                            self._joy_select()
+                        elif event.code in [ecodes.BTN_EAST, ecodes.BTN_B]:
+                            self._joy_back()
 
-                    for event in dev.read():
-                        # BOTONES
-                        if event.type == ecodes.EV_KEY and event.value == 1:
-                            if event.code in BTN_ACCEPT:
-                                self._joy_select()
-                            elif event.code in BTN_CANCEL:
-                                self._joy_back()
+                # --- EJES (D-PAD Y STICKS) ---
+                elif event.type == ecodes.EV_ABS:
+                    val = event.value
+                    if event.code in [ecodes.ABS_Y, ecodes.ABS_HAT0Y]:
+                        # Normalizar D-PAD (1, -1) y Stick (valores altos)
+                        if val > JOY_AXIS_THRESHOLD or val == 1:
+                            self._joy_nav(1)
+                        elif val < -JOY_AXIS_THRESHOLD or val == -1:
+                            self._joy_nav(-1)
 
-                        # EJES (DPAD y Sticks)
-                        elif event.type == ecodes.EV_ABS:
-                            val = event.value
-                            code = event.code
-
-                            if code == ecodes.ABS_HAT0Y: # D-Pad Vertical
-                                if val == -1: self._joy_nav(-1)
-                                elif val == 1: self._joy_nav(1)
-                            
-                            elif code == ecodes.ABS_Y: # Stick Izquierdo Vertical
-                                if val < -JOY_AXIS_THRESHOLD: self._joy_nav(-1)
-                                elif val > JOY_AXIS_THRESHOLD: self._joy_nav(1)
-
-        except (OSError, Exception) as e:
-            print(f"[Overlay] Error en el hilo del mando: {e}")
+        except Exception as e:
+            print(f"[Overlay] Hilo de mando detenido: {e}")
         finally:
-            sel.close()
             self.joy_thread_running = False
-            self.joy = None # Forzar re-escaneo
+            try: dev.ungrab()
+            except: pass
 
 
     # ---------------------------
@@ -861,58 +849,54 @@ class OverlayApp:
         threading.Thread(target=srv, daemon=True).start()
 
     def _rescan_joystick(self):
-        """Hilo perpetuo que busca mandos si no hay ninguno activo."""
-        while True:
-            # Si no hay mando o el archivo del mando actual ya no existe
-            if self.joy is None or not os.path.exists(self.joy.path):
-                if self.joy:
-                    print(f"[Overlay] Mando desconectado: {self.joy.name}")
-                    self.joy = None
-                    self.joy_thread_running = False
+            """Busca mandos continuamente y reinicia el listener si es necesario."""
+            time.sleep(1)
+            while True:
+                try:
+                    # Verificar si el mando actual sigue vivo
+                    if self.joy is not None:
+                        try:
+                            self.joy.capabilities() # Test de conexión
+                        except (OSError, Exception):
+                            print("[Overlay] Mando perdido.")
+                            self.joy = None
+                            self.joy_thread_running = False
 
-                # Buscar nuevos dispositivos
-                for path in list_devices():
-                    try:
-                        d = InputDevice(path)
-                        if is_gamepad(d):
-                            print(f"[Overlay] Mando detectado: {d.name} en {path}")
-                            self.joy = d
-                            # Iniciamos el listener si no está corriendo
-                            if not self.joy_thread_running:
-                                self._start_joystick_listener()
-                            break 
-                    except:
-                        continue
-            time.sleep(2) # Escanea cada 2 segundos para no saturar la CPU
+                    # Si no hay mando, buscar uno nuevo
+                    if self.joy is None:
+                        for path in list_devices():
+                            try:
+                                d = InputDevice(path)
+                                if is_gamepad(d):
+                                    print(f"[Overlay] Conectado a: {d.name}")
+                                    self.joy = d
+                                    # Iniciar el hilo de escucha inmediatamente
+                                    self._start_joystick_listener()
+                                    break
+                            except:
+                                continue
+                except Exception as e:
+                    print(f"[Overlay] Error en rescan: {e}")
+                
+                time.sleep(2)
 
 
     def _hide_overlay(self):
         OVERLAY_VISIBLE.clear()
-
         if self.joy:
-            try:
-                self.joy.ungrab()
-            except:
-                pass
-
+            try: self.joy.ungrab()
+            except: pass
         self.root.withdraw()
-
 
     def _show_overlay(self):
         OVERLAY_VISIBLE.set()
-
         if self.joy:
-            try:
-                self.joy.grab()
-            except:
-                pass
-
+            try: self.joy.grab()
+            except: pass
         self.root.deiconify()
-        try:
-            self.root.attributes("-fullscreen", True)
-        except:
-            pass
-        self._force_focus()
+        self.root.attributes("-fullscreen", True)
+        self.root.focus_force()
+        self.initial_position() # Reinicia la selección al abrir
 
 
 

@@ -6,6 +6,12 @@ if [ -f "$FILE" ]; then
     while read name; do
         [ -z "$name" ] && continue
 
+        # Caso especial: waydroid
+        if echo "$name" | grep -qi "waydroid"; then
+            waydroid session stop
+            continue
+        fi
+
         # Buscar procesos cuyo comando contenga el nombre
         for pid in $(ps w | grep -i "$name" | grep -v grep | awk '{print $1}'); do
             # Obtener comando completo

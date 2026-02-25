@@ -663,6 +663,8 @@ class OverlayApp:
             except: pass
 
     def _process_joystick_event(self, event):
+        if not OVERLAY_VISIBLE.is_set(): 
+            return
         # BOTONES
         if event.type == ecodes.EV_KEY:
             if event.value == 1:  # PRESIONADO

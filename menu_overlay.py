@@ -310,7 +310,7 @@ MENU_ITEMS = [
     {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
     {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
-    {"icon": {"nf": "󰙯", "fallback": "󰎄"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
+    {"icon": {"nf": "󰙯", "fallback": "S"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
 
     {"type": "header", "label": "SISTEMA"},
     {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},
@@ -557,47 +557,148 @@ class OverlayApp:
         self.root.after(2000, self.reveal_menu_final)
 
     def show_warning(self, message, on_confirm):
-        win = tk.Toplevel(self.root)
-        win.title("Advertencia")
-        win.configure(bg="#111111")
-        win.transient(self.root)
-        win.grab_set()
+        # Si ya existe un overlay previo, eliminarlo
+        if hasattr(self, "warn_overlay") and self.warn_overlay:
+            self.warn_overlay.destroy()
 
-        w, h = 420, 200
-        x = (self.sw - w) // 2
-        y = (self.sh - h) // 2
-        win.geometry(f"{w}x{h}+{x}+{y}")
+        # === CAPA OSCURA FULLSCREEN ===
+        self.warn_overlay = tk.Frame(self.root, bg="#000000", highlightthickness=0)
+        self.warn_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
 
-        tk.Label(
-            win,
+        # === TARJETA CENTRADA ===
+        card_w = sc(600)
+        card_h = sc(300)
+
+        card = tk.Frame(
+            self.warn_overlay,
+            bg=C_CARD_BG,
+            bd=0,
+            highlightthickness=0
+        )
+        card.place(relx=0.5, rely=0.5, anchor="center", width=card_w, height=card_h)
+
+        # === TEXTO ===
+        lbl = tk.Label(
+            card,
             text=message,
-            fg="white",
-            bg="#111111",
-            font=(self.font, fs(12)),
-            wraplength=w - 40,
-            justify="left"
-        ).pack(pady=20, padx=20)
+            fg=C_TEXT_MAIN,
+            bg=C_CARD_BG,
+            font=(self.font, fs(16)),
+            wraplength=card_w - sc(40),
+            justify="center"
+        )
+        lbl.pack(pady=sc(20), padx=sc(20))
 
-        btn_frame = tk.Frame(win, bg="#111111")
-        btn_frame.pack(pady=10)
+        # === BOTONES ===
+        btn_frame = tk.Frame(card, bg=C_CARD_BG)
+        btn_frame.pack(pady=sc(20))
 
-        tk.Button(
-            btn_frame,
-            text="Cancelar",
-            width=12,
-            command=win.destroy
-        ).pack(side="left", padx=10)
+        # Estados para navegación
+        self.warn_idx = 0
+        self.warn_buttons = []
 
-        def _confirm():
-            win.destroy()
+        def make_btn(text, cmd):
+            b = tk.Label(
+                btn_frame,
+                text=text,
+                bg="#222222",
+                fg="white",
+                font=(self.font, fs(18), "bold"),
+                width=16,
+                height=2,
+                bd=0,
+                highlightthickness=0
+            )
+            b.pack(side="left", padx=sc(20))
+            b.bind("<Button-1>", lambda e: cmd())
+            self.warn_buttons.append(b)
+            return b
+
+        def close_overlay():
+            # 1. Desvincular teclas
+            try:
+                self.warn_overlay.unbind_all("<Key>")
+            except:
+                pass
+
+            # 2. Limpiar botones
+            self.warn_buttons = []
+            self.warn_idx = 0
+
+            # 3. Limpiar handlers de joystick
+            self.joy_warning_nav = None
+            self.joy_warning_select = None
+
+            # 4. Destruir overlay
+            try:
+                self.warn_overlay.destroy()
+            except:
+                pass
+
+            self.warn_overlay = None
+
+
+        def confirm():
+            close_overlay()
             on_confirm()
 
-        tk.Button(
-            btn_frame,
-            text="Continuar",
-            width=12,
-            command=_confirm
-        ).pack(side="right", padx=10)
+
+        btn_cancel = make_btn("Cancelar", close_overlay)
+        btn_ok = make_btn("Continuar", confirm)
+
+        # === HIGHLIGHT VISUAL ===
+        def update_warn_sel():
+            for i, b in enumerate(self.warn_buttons):
+                if i == self.warn_idx:
+                    b.config(bg=C_CARD_HOVER)
+                else:
+                    b.config(bg="#222222")
+
+        update_warn_sel()
+
+        # === NAVEGACIÓN TECLADO ===
+        def key_nav(e):
+            if not self.warn_overlay:
+                return  # evita errores si ya se cerró
+
+            if not self.warn_buttons:
+                return
+
+            if e.keysym in ("Left", "Up"):
+                self.warn_idx = max(0, self.warn_idx - 1)
+                update_warn_sel()
+            elif e.keysym in ("Right", "Down"):
+                self.warn_idx = min(len(self.warn_buttons) - 1, self.warn_idx + 1)
+                update_warn_sel()
+            elif e.keysym == "Return":
+                if self.warn_idx == 0:
+                    close_overlay()
+                else:
+                    confirm()
+            elif e.keysym == "Escape":
+                close_overlay()
+
+
+        self.warn_overlay.bind_all("<Key>", key_nav)
+
+        # === NAVEGACIÓN JOYSTICK ===
+        # Reutilizamos tu sistema de joystick, solo redirigimos eventos
+        self._joy_last_nav = 0
+
+        def joy_nav(direction):
+            self.warn_idx = max(0, min(len(self.warn_buttons) - 1, self.warn_idx + direction))
+            update_warn_sel()
+
+        def joy_select():
+            if self.warn_idx == 0:
+                close_overlay()
+            else:
+                confirm()
+
+        # Guardamos handlers para que _process_joystick_event los use
+        self.joy_warning_nav = joy_nav
+        self.joy_warning_select = joy_select
+
 
     # ---------------------------
     # LÓGICA DE JOYSTICK CORREGIDA
@@ -666,6 +767,22 @@ class OverlayApp:
         if not OVERLAY_VISIBLE.is_set(): 
             return
         # BOTONES
+        # Si hay advertencia fullscreen, redirigir controles
+        if hasattr(self, "warn_overlay") and self.warn_overlay:
+            if event.type == ecodes.EV_KEY and event.value == 1:
+                if event.code in [ecodes.BTN_SOUTH, ecodes.BTN_A]:
+                    self.joy_warning_select()
+                elif event.code in [ecodes.BTN_EAST, ecodes.BTN_B]:
+                    self.warn_overlay.destroy()
+                    self.warn_overlay = None
+                    self.root.attributes("-alpha", 1.0)
+            elif event.type == ecodes.EV_ABS and event.code == ecodes.ABS_HAT0X:
+                if event.value == -1:
+                    self.joy_warning_nav(-1)
+                elif event.value == 1:
+                    self.joy_warning_nav(1)
+            return
+
         if event.type == ecodes.EV_KEY:
             if event.value == 1:  # PRESIONADO
 
@@ -964,5 +1081,9 @@ if __name__ == "__main__":
         sys.exit()
 
     app = OverlayApp()
-    app.root.withdraw() 
+    app.root.withdraw()
+    try:
+        app.root.attributes("-alpha", 0.97)
+    except:
+        pass 
     app.root.mainloop()

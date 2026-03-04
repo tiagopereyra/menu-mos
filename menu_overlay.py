@@ -310,7 +310,7 @@ MENU_ITEMS = [
     {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
     {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
-    {"icon": {"nf": "󰙯", "fallback": "S"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
+    {"icon": {"nf": "S", "fallback": "S"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
 
     {"type": "header", "label": "SISTEMA"},
     {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},

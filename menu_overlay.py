@@ -645,16 +645,11 @@ class OverlayApp:
 
 
         def confirm():
+            # Ejecutar primero la acción
+            on_confirm()
+
+            # Recién después cerrar el overlay
             close_overlay()
-            result = on_confirm()
-
-            # Si la acción devolvió un comando, ejecutarlo
-            if isinstance(result, dict) and "cmd" in result:
-                try:
-                    run_fast(result["cmd"])
-                except Exception as e:
-                    print(f"[Overlay] Error ejecutando comando: {e}")
-
 
 
         btn_cancel = make_btn("Cancelar", close_overlay)

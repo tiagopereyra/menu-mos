@@ -305,12 +305,13 @@ def action_back(): return "exit"
 # 📋 DEFINICIÓN DEL MENÚ
 # ==========================================
 
+#  {"icon": {"nf": "S", "fallback": "S"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
+
 MENU_ITEMS = [
     {"type": "header", "label": "APLICACIONES"},
     {"icon": {"nf": "󰔟", "fallback": ""}, "label": "Volver al menu principal", "desc": "Cerrar aplicaciones y volver", "fn": action_es},
     {"icon": {"nf": "󰉋", "fallback": "📁"}, "label": "Explorador de Archivos", "desc": "Gestionar archivos", "fn": action_files},
     {"icon": {"nf": "󰙯", "fallback": "💬"}, "label": "Discord", "desc": "Abrir chat de voz", "fn": action_discord},
-    {"icon": {"nf": "S", "fallback": "S"}, "label": "Spotify", "desc": "Abrir reproductor de música", "fn": action_spotify},
 
     {"type": "header", "label": "SISTEMA"},
     {"icon": {"nf": "󰊴", "fallback": "🎮"}, "label": "Salir del menu", "desc": "Ocultar menú", "fn": action_back},
@@ -471,6 +472,11 @@ class OverlayApp:
         self.root.configure(bg="black")
         self.joy_thread_running = False
         self.joy_thread = None
+
+        self.root.configure(cursor="none")
+        self.root.bind_all("<Motion>", lambda e: "break")
+        self.root.bind_all("<Button>", lambda e: "break")
+
         
         # Estado del Joystick
         self.joy = None
@@ -640,7 +646,15 @@ class OverlayApp:
 
         def confirm():
             close_overlay()
-            on_confirm()
+            result = on_confirm()
+
+            # Si la acción devolvió un comando, ejecutarlo
+            if isinstance(result, dict) and "cmd" in result:
+                try:
+                    run_fast(result["cmd"])
+                except Exception as e:
+                    print(f"[Overlay] Error ejecutando comando: {e}")
+
 
 
         btn_cancel = make_btn("Cancelar", close_overlay)

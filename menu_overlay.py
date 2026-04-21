@@ -604,19 +604,22 @@ class OverlayApp:
         self.warn_buttons = []
 
         def make_btn(text, cmd):
-            b = tk.Label(
+            b = tk.Button(
                 btn_frame,
                 text=text,
                 bg="#222222",
                 fg="white",
                 font=(self.font, fs(18), "bold"),
-                width=16,
-                height=2,
+                padx=sc(30),
+                pady=sc(15),
                 bd=0,
-                highlightthickness=0
+                highlightthickness=2,
+                highlightbackground="#444444",
+                activebackground=C_CARD_HOVER,
+                activeforeground="white",
+                command=cmd
             )
             b.pack(side="left", padx=sc(20))
-            b.bind("<Button-1>", lambda e: cmd())
             self.warn_buttons.append(b)
             return b
 
@@ -659,9 +662,9 @@ class OverlayApp:
         def update_warn_sel():
             for i, b in enumerate(self.warn_buttons):
                 if i == self.warn_idx:
-                    b.config(bg=C_CARD_HOVER)
+                    b.config(bg=C_CARD_HOVER, highlightbackground=C_CARD_HOVER)
                 else:
-                    b.config(bg="#222222")
+                    b.config(bg="#222222", highlightbackground="#444444")
 
         update_warn_sel()
 
@@ -934,8 +937,14 @@ class OverlayApp:
 
             def do_cmd():
                 if cmd:
-                    run_fast(cmd)
-                self._hide_overlay() 
+                    try:
+                        # Ejecutar comando de forma segura
+                        subprocess.Popen(cmd, start_new_session=True)
+                        time.sleep(0.5)  # Dar tiempo para que inicie
+                    except Exception as e:
+                        print(f"[Err] Comando failed: {cmd}: {e}")
+                # Esperar un poco y luego ocultarse
+                self.root.after(1000, self._hide_overlay)
 
             self.show_warning(msg, do_cmd)
             return

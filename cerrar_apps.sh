@@ -20,7 +20,7 @@ if [ -f "$FILE" ]; then
             continue
         fi
 
-        for pid in $(pgrep -i "$name"); do
+        for pid in $(pgrep -f "$name"); do
             [ "$pid" = "$$" ] && continue 
             echo "[M-OS] Terminando proceso: $pid ($name)"
             kill -9 "$pid" 2>/dev/null

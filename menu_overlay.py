@@ -280,7 +280,7 @@ def action_reboot():
     if status:
         return {
             "warning": f"El sistema está en actualización o con estado especial:\n{status}\n\n¿Reiniciar igualmente?",
-            "cmd": ["sudo", "reboot"],
+            "cmd": ["systemctl", "reboot"],
         }
 
     run_fast(["systemctl", "reboot"])
@@ -292,7 +292,7 @@ def action_shutdown():
     if status:
         return {
             "warning": f"El sistema está en actualización o con estado especial:\n{status}\n\n¿Apagar igualmente?",
-            "cmd": ["sudo", "poweroff"],
+            "cmd": ["systemctl", "poweroff"],
         }
 
     run_fast(["systemctl", "poweroff"])

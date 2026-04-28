@@ -247,7 +247,7 @@ def action_toggle_night_light():
         return [["gammastep", "-O", "3500"], ["touch", state_file]]
 
 def action_es():
-    run_threaded_action(["/usr/bin/cerrar_apps.sh"])
+    run_threaded_action(["/home/muser/ES-DE/scripts/cerrar_apps.sh"])
     kill_es_de()
     run_fast(["/home/muser/ES-DE/scripts/generar_steam_games.sh"])
     run_fast(["es-de", "--force-kiosk", "--no-splash", "--no-update-check"])

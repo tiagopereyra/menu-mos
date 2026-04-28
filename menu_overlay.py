@@ -260,7 +260,8 @@ def action_files():
 
 def action_discord():
     register_app("Discord")
-    run_fast(["flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord"])
+    #run_fast(["flatpak", "run", "--branch=stable", "--arch=x86_64", "com.discordapp.Discord"])
+    run_fast(["python3", "/home/muser/ROMs/internet/Discord.sh"])
     return "exit"
 
 def action_wifi():

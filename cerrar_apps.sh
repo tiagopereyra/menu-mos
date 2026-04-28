@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# ============================
+#  CERRAR RETROARCH
+# ============================
 if pgrep -x "retroarch" > /dev/null; then
     echo "[M-OS] Cerrando RetroArch..."
     pkill -TERM -x "retroarch"
@@ -9,22 +12,38 @@ fi
 
 FILE="/tmp/open_apps"
 
+# ============================
+#  PROCESAR ARCHIVO open_apps
+# ============================
 if [ -f "$FILE" ]; then
     while read name; do
         [ -z "$name" ] && continue
 
-        # Caso especial: waydroid
+        # ============================
+        #  CASO ESPECIAL: WAYDROID
+        # ============================
         if echo "$name" | grep -qi "waydroid"; then
             echo "[M-OS] Deteniendo sesión de Waydroid..."
             waydroid session stop
             continue
         fi
 
-        # 🔥 Caso especial: DOCKER
+        # ============================
+        #  CASO ESPECIAL: DISCORD (FLATPAK)
+        # ============================
+        if echo "$name" | grep -qi "discord"; then
+            echo "[M-OS] Cerrando Discord limpiamente..."
+            flatpak kill com.discordapp.Discord 2>/dev/null || true
+            sleep 1
+            continue
+        fi
+
+        # ============================
+        #  CASO ESPECIAL: DOCKER
+        # ============================
         if echo "$name" | grep -qi "docker"; then
             echo "[M-OS] Deteniendo contenedores Docker..."
 
-            # Apagar contenedores activos
             CONTAINERS=$(docker ps -q)
             if [ -n "$CONTAINERS" ]; then
                 docker stop $CONTAINERS
@@ -40,12 +59,15 @@ if [ -f "$FILE" ]; then
             continue
         fi
 
-        # Procesos normales
+        # ============================
+        #  PROCESOS NORMALES
+        # ============================
         for pid in $(pgrep -f "$name"); do
-            [ "$pid" = "$$" ] && continue 
+            [ "$pid" = "$$" ] && continue  # No matarse a sí mismo
             echo "[M-OS] Terminando proceso: $pid ($name)"
             kill -9 "$pid" 2>/dev/null
         done
+
     done < "$FILE"
 fi
 
